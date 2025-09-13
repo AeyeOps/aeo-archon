@@ -1,7 +1,6 @@
 services:
   archon-server:
     image: ${ARCHON_SERVER_IMAGE:-archon-archon-server:latest}
-    container_name: archon-server
     ports:
       - "${ARCHON_SERVER_PORT:-8181}:${ARCHON_SERVER_PORT:-8181}"
     env_file:
@@ -32,7 +31,6 @@ services:
 
   archon-mcp:
     image: ${ARCHON_MCP_IMAGE:-archon-archon-mcp:latest}
-    container_name: archon-mcp
     ports:
       - "${ARCHON_MCP_PORT:-8051}:${ARCHON_MCP_PORT:-8051}"
     env_file:
@@ -70,7 +68,6 @@ services:
     profiles:
       - agents
     image: ${ARCHON_AGENTS_IMAGE:-archon-archon-agents:latest}
-    container_name: archon-agents
     ports:
       - "${ARCHON_AGENTS_PORT:-8052}:${ARCHON_AGENTS_PORT:-8052}"
     env_file:
@@ -99,7 +96,6 @@ services:
 
   archon-frontend:
     image: ${ARCHON_FRONTEND_IMAGE:-archon-archon-frontend:latest}
-    container_name: archon-ui
     ports:
       - "${ARCHON_UI_PORT:-3737}:3737"
     environment:
@@ -123,7 +119,6 @@ services:
 
   openobserve:
     image: public.ecr.aws/zinclabs/openobserve:latest
-    container_name: openobserve
     ports:
       - "5080:5080"
     environment:
