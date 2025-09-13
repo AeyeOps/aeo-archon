@@ -1,12 +1,13 @@
 services:
   archon-server:
-    image: ${ARCHON_SERVER_IMAGE:-archon-archon-server:latest}
+    image: ${ARCHON_SERVER_IMAGE}
+    container_name: archon-server
     ports:
       - "${ARCHON_SERVER_PORT:-8181}:${ARCHON_SERVER_PORT:-8181}"
     env_file:
       - .env
     environment:
-      - SUPABASE_URL=${SUPABASE_URL_CONTAINER:-http://host.docker.internal:54321}
+      - SUPABASE_URL=${SUPABASE_URL_CONTAINER}
       - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - LOGFIRE_TOKEN=${LOGFIRE_TOKEN:-}
@@ -16,8 +17,8 @@ services:
       - ARCHON_MCP_PORT=${ARCHON_MCP_PORT:-8051}
       - ARCHON_AGENTS_PORT=${ARCHON_AGENTS_PORT:-8052}
       - AGENTS_ENABLED=${AGENTS_ENABLED:-false}
-      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT_CONTAINER:-http://openobserve:4318}
-      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME_ARCHON_SERVER:-archon-server}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT_CONTAINER}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME_ARCHON_SERVER}
     networks:
       - app-network
     extra_hosts:
@@ -30,13 +31,14 @@ services:
       start_period: 40s
 
   archon-mcp:
-    image: ${ARCHON_MCP_IMAGE:-archon-archon-mcp:latest}
+    image: ${ARCHON_MCP_IMAGE}
+    container_name: archon-mcp
     ports:
       - "${ARCHON_MCP_PORT:-8051}:${ARCHON_MCP_PORT:-8051}"
     env_file:
       - .env
     environment:
-      - SUPABASE_URL=${SUPABASE_URL_CONTAINER:-http://host.docker.internal:54321}
+      - SUPABASE_URL=${SUPABASE_URL_CONTAINER}
       - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
       - LOGFIRE_TOKEN=${LOGFIRE_TOKEN:-}
       - SERVICE_DISCOVERY_MODE=docker_compose
@@ -48,8 +50,8 @@ services:
       - ARCHON_MCP_PORT=${ARCHON_MCP_PORT:-8051}
       - ARCHON_SERVER_PORT=${ARCHON_SERVER_PORT:-8181}
       - ARCHON_AGENTS_PORT=${ARCHON_AGENTS_PORT:-8052}
-      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT_CONTAINER:-http://openobserve:4318}
-      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME_ARCHON_MCP:-archon-mcp}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT_CONTAINER}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME_ARCHON_MCP}
     networks:
       - app-network
     depends_on:
@@ -64,10 +66,40 @@ services:
       retries: 5
       start_period: 60s
 
-  
+  archon-agents:
+    profiles:
+      - agents
+    image: ${ARCHON_AGENTS_IMAGE}
+    container_name: archon-agents
+    ports:
+      - "${ARCHON_AGENTS_PORT:-8052}:${ARCHON_AGENTS_PORT:-8052}"
+    env_file:
+      - .env
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL_CONTAINER}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - LOGFIRE_TOKEN=${LOGFIRE_TOKEN:-}
+      - SERVICE_DISCOVERY_MODE=docker_compose
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ARCHON_AGENTS_PORT=${ARCHON_AGENTS_PORT:-8052}
+      - ARCHON_SERVER_PORT=${ARCHON_SERVER_PORT:-8181}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT_CONTAINER}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME_ARCHON_AGENTS}
+    networks:
+      - app-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:${ARCHON_AGENTS_PORT:-8052}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
 
   archon-frontend:
-    image: ${ARCHON_FRONTEND_IMAGE:-archon-archon-frontend:latest}
+    image: ${ARCHON_FRONTEND_IMAGE}
+    container_name: archon-ui
     ports:
       - "${ARCHON_UI_PORT:-3737}:3737"
     environment:
@@ -90,7 +122,10 @@ services:
       retries: 5
 
   openobserve:
+    profiles:
+      - observability
     image: public.ecr.aws/zinclabs/openobserve:latest
+    container_name: openobserve
     ports:
       - "5080:5080"
     environment:
