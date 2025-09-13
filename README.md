@@ -96,6 +96,33 @@ Idempotency and safety:
 - Agents: `http://HOST:8052`
 - Observability (OpenObserve): `http://HOST:5080`
 
+## Nano Banana Demo (Replicate)
+
+Generate demo images with Replicate and embed locally.
+
+Requirements:
+- `REPLICATE_API_TOKEN` set in the environment
+- `curl` and `jq` installed
+
+Steps:
+
+```bash
+# Generate two images under ./images
+export REPLICATE_API_TOKEN=... # your token
+bash ./scripts/generate-nano-banana.sh --count 2
+
+# Review files and commit
+ls -1 images/
+git add images/*.png
+git commit -m "Add nano banana demo images"
+git push
+```
+
+After generation, the images below will render in this README:
+
+![Nano Banana 1](images/nano-banana-1.png)
+![Nano Banana 2](images/nano-banana-2.png)
+
 ## One‑Time Database Setup
 
 Run the contents of `migration/complete_setup.sql` in your Supabase SQL editor to initialize required tables and settings.
