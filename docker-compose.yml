@@ -67,6 +67,8 @@ services:
       start_period: 60s
 
   archon-agents:
+    profiles:
+      - agents
     image: ${ARCHON_AGENTS_IMAGE:-archon-archon-agents:latest}
     container_name: archon-agents
     ports:
@@ -146,4 +148,3 @@ networks:
 volumes:
   openobserve-data:
     driver: local
-
