@@ -23,4 +23,3 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 *.pyc
-git_sync_report.md
