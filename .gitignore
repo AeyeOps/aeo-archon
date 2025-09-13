@@ -1,5 +1,6 @@
 # Environment
 .env
+!/.env
 !.env.sample
 .env.backup*
 .env.*backup*
