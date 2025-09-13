@@ -1,0 +1,24 @@
+# Environment
+.env
+!.env.sample
+.env.backup*
+.env.*backup*
+
+# OS / logs
+.DS_Store
+*.log
+
+# Bootstrap clone (source-based mode)
+archon-src/
+
+# Node
+node_modules/
+dist/
+coverage/
+
+# Python
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.pyc
