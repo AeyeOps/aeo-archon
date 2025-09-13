@@ -65,8 +65,6 @@ services:
       start_period: 60s
 
   archon-agents:
-    profiles:
-      - agents
     image: ${ARCHON_AGENTS_IMAGE:-archon-archon-agents:latest}
     ports:
       - "${ARCHON_AGENTS_PORT:-8052}:${ARCHON_AGENTS_PORT:-8052}"
