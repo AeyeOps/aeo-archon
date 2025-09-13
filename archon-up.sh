@@ -47,6 +47,7 @@ done
 
 upsert_env(){ local k="$1"; local v="$2"; local tmp="$ENV_FILE.tmp"; awk -v k="$k" -v v="$v" 'BEGIN{done=0}{ if(!done && $0 ~ "^" k "=") { print k"="v; done=1 } else { print $0 } } END{ if(!done) print k"="v }' "$ENV_FILE" > "$tmp"; mv "$tmp" "$ENV_FILE"; }
 merge_csv_unique(){ local csv="$1"; local item="$2"; awk -v csv="$csv" -v item="$item" 'BEGIN{ n=split(csv,a,/[ ,]+/); for(i=1;i<=n;i++) if(length(a[i])) { if(!s[a[i]]) { s[a[i]]=1; o[++m]=a[i] } } if(length(item)&&!s[item]) o[++m]=item; for(i=1;i<=m;i++){ if(i>1) printf ","; printf "%s", o[i] } printf "\n" }'; }
+upsert_if_empty(){ local k="$1"; local v="$2"; if ! grep -q "^${k}=" "$ENV_FILE" || grep -q "^${k}=\s*$" "$ENV_FILE"; then upsert_env "$k" "$v"; fi }
 
 # Required images
 req=(ARCHON_SERVER_IMAGE ARCHON_MCP_IMAGE ARCHON_FRONTEND_IMAGE)
@@ -64,8 +65,10 @@ if [[ -n "$HOST_OVERRIDE" ]]; then upsert_env HOST "$HOST_OVERRIDE"; fi
 HOST_VAL=$(grep -E '^HOST=' "$ENV_FILE" | sed 's/^HOST=//;s/\r$//'); HOST_VAL=${HOST_VAL:-localhost}
 existing=$(grep -E '^VITE_ALLOWED_HOSTS=' "$ENV_FILE" | sed 's/^VITE_ALLOWED_HOSTS=//;s/\r$//') || existing=""
 upsert_env VITE_ALLOWED_HOSTS "$(merge_csv_unique "$existing" "$HOST_VAL")"
-# Single-port toggle
-if [[ $enable_single_port -eq 1 ]]; then upsert_env PROD true; else upsert_env PROD false; fi
+# Single-port toggle: only set if missing; otherwise preserve
+if ! grep -q '^PROD=' "$ENV_FILE" || grep -q '^PROD=\s*$' "$ENV_FILE"; then
+  if [[ $enable_single_port -eq 1 ]]; then upsert_env PROD true; else upsert_env PROD false; fi
+fi
 
 # Observability config
 SKIP_COMPOSE_OBS=0
