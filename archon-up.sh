@@ -123,8 +123,8 @@ ensure_supabase_env(){
   npx -y supabase@latest start || { err "Failed to start local Supabase via CLI"; exit 1; }
   # Query status in env format and parse required values
   STATUS_ENV=$(npx -y supabase@latest status -o env) || { err "Failed to get Supabase status"; exit 1; }
-  SERVICE_ROLE_KEY=$(echo "$STATUS_ENV" | awk -F'=' '/^SERVICE_ROLE_KEY/{gsub(/\"/,"",$2); print $2}')
-  API_URL=$(echo "$STATUS_ENV" | awk -F'=' '/^API_URL/{gsub(/\"/,"",$2); print $2}')
+  SERVICE_ROLE_KEY=$(echo "$STATUS_ENV" | awk -F'=' '/^SERVICE_ROLE_KEY/{gsub(/"/,"",$2); print $2}')
+  API_URL=$(echo "$STATUS_ENV" | awk -F'=' '/^API_URL/{gsub(/"/,"",$2); print $2}')
   popd >/dev/null
   if [[ -z "$SERVICE_ROLE_KEY" || -z "$API_URL" ]]; then
     err "Supabase status missing SERVICE_ROLE_KEY or API_URL; cannot continue"; exit 1
@@ -144,7 +144,20 @@ ensure_supabase_env(){
 ensure_supabase_env
 
 # Host handling
-if [[ -n "$HOST_OVERRIDE" ]]; then upsert_env HOST "$HOST_OVERRIDE"; fi
+IS_WSL=0
+if [[ -f /proc/sys/kernel/osrelease ]] && grep -qi "microsoft" /proc/sys/kernel/osrelease 2>/dev/null; then
+  IS_WSL=1
+fi
+
+CURRENT_HOST=$(grep -E '^HOST=' "$ENV_FILE" | sed 's/^HOST=//;s/\r$//' || true)
+if [[ -n "$HOST_OVERRIDE" ]]; then
+  upsert_env HOST "$HOST_OVERRIDE"
+elif [[ $IS_WSL -eq 1 ]]; then
+  if [[ -z "$CURRENT_HOST" || "$CURRENT_HOST" =~ ^172\. ]]; then
+    upsert_env HOST "localhost"
+  fi
+fi
+
 HOST_VAL=$(grep -E '^HOST=' "$ENV_FILE" | sed 's/^HOST=//;s/\r$//'); HOST_VAL=${HOST_VAL:-localhost}
 existing=$(grep -E '^VITE_ALLOWED_HOSTS=' "$ENV_FILE" | sed 's/^VITE_ALLOWED_HOSTS=//;s/\r$//') || existing=""
 upsert_env VITE_ALLOWED_HOSTS "$(merge_csv_unique "$existing" "$HOST_VAL")"
@@ -211,8 +224,9 @@ if [[ $run_migrations -eq 1 ]]; then
   done
   docker run --rm --network supabase_network_supabase \
     -e DB_HOST="$DB_HOST" -e DB_PORT="$DB_PORT" -e DB_USER="$DB_USER" -e DB_PASSWORD="$DB_PASSWORD" -e DB_NAME="$DB_NAME" \
+    -e PIP_ROOT_USER_ACTION=ignore -e PIP_DISABLE_PIP_VERSION_CHECK=1 \
     -v "$ROOT_DIR":/work -w /work \
-    python:3.12-slim bash -lc "pip install -q psycopg2-binary && python migration/run_migrations.py" \
+    python:3.12-slim bash -lc "pip install -q --upgrade pip && pip install -q psycopg2-binary && python migration/run_migrations.py" \
     && ok "Migrations applied"
   if [[ -n "$SUPABASE_KONG" ]]; then
     wait_for_supabase_table "$SUPABASE_KONG" "archon_settings" "$SUPABASE_SERVICE_KEY_VAL"
@@ -271,7 +285,7 @@ if [[ $skip_verify -eq 0 ]]; then
     check_service "Agents" "http://$CHECK_HOST:$AGENTS_PORT/health" 20 3
   fi
   if [[ "$observability" != "none" ]]; then
-    check_service "OpenObserve UI" "http://$CHECK_HOST:5080/"
+    check_service "OpenObserve UI" "http://$CHECK_HOST:5080/" 24 5 "200 201 204 301 302 303 307 308"
   fi
 fi
 
@@ -285,9 +299,45 @@ AGENTS_PORT=${AGENTS_PORT:-$(grep -E '^ARCHON_AGENTS_PORT=' "$ENV_FILE" | sed 's
 AGENTS_PORT=${AGENTS_PORT:-8052}
 PROD=${PROD:-$(grep -E '^PROD=' "$ENV_FILE" | sed 's/^PROD=//;s/\r$//')}
 
+ALT_HOST=""
+if [[ -f /proc/sys/kernel/osrelease ]] && grep -qi "microsoft" /proc/sys/kernel/osrelease 2>/dev/null; then
+  ALT_HOST="localhost"
+fi
+
 echo -e "${GREEN}Done. Access:${NC}"
 echo "- UI:  http://$HOST_VAL:$UI_PORT"
-if [[ "${PROD:-true}" == "true" ]]; then echo "- API: http://$HOST_VAL:$UI_PORT/api (single-port)"; else echo "- API: http://$HOST_VAL:$API_PORT"; fi
+if [[ -n "$ALT_HOST" && "$ALT_HOST" != "$HOST_VAL" ]]; then
+  echo "  (WSL) http://$ALT_HOST:$UI_PORT"
+fi
+
+if [[ "${PROD:-true}" == "true" ]]; then
+  echo "- API: http://$HOST_VAL:$UI_PORT/api (single-port)"
+  if [[ -n "$ALT_HOST" && "$ALT_HOST" != "$HOST_VAL" ]]; then
+    echo "  (WSL) http://$ALT_HOST:$UI_PORT/api (single-port)"
+  fi
+else
+  echo "- API: http://$HOST_VAL:$API_PORT"
+  if [[ -n "$ALT_HOST" && "$ALT_HOST" != "$HOST_VAL" ]]; then
+    echo "  (WSL) http://$ALT_HOST:$API_PORT"
+  fi
+fi
+
 echo "- MCP: http://$HOST_VAL:$MCP_PORT"
-[[ $enable_agents -eq 1 ]] && echo "- Agents: http://$HOST_VAL:$AGENTS_PORT" || true
-[[ "$observability" != "none" ]] && echo "- Observability: http://$HOST_VAL:5080" || true
+if [[ -n "$ALT_HOST" && "$ALT_HOST" != "$HOST_VAL" ]]; then
+  echo "  (WSL) http://$ALT_HOST:$MCP_PORT"
+fi
+
+if [[ $enable_agents -eq 1 ]]; then
+  echo "- Agents: http://$HOST_VAL:$AGENTS_PORT"
+  if [[ -n "$ALT_HOST" && "$ALT_HOST" != "$HOST_VAL" ]]; then
+    echo "  (WSL) http://$ALT_HOST:$AGENTS_PORT"
+  fi
+fi
+
+if [[ "$observability" != "none" ]]; then
+  echo "- Observability: http://$HOST_VAL:5080"
+  if [[ -n "$ALT_HOST" && "$ALT_HOST" != "$HOST_VAL" ]]; then
+    echo "  (WSL) http://$ALT_HOST:5080"
+  fi
+  echo "  (OpenObserve login: admin@archon.local / archon-admin)"
+fi
