@@ -148,12 +148,18 @@ class MigrationRunner:
         """Run all pending migrations in order"""
         if not self.connect():
             return False
-        
+
         try:
             self.create_migrations_table()
-            
+
             # Get all SQL files in migrations directory
-            migration_files = sorted(self.migrations_dir.glob("*.sql"))
+            def sort_key(path: Path):
+                name = path.name
+                if name == "complete_setup.sql":
+                    return (0, name)
+                return (1, name)
+
+            migration_files = sorted(self.migrations_dir.glob("*.sql"), key=sort_key)
             
             if not migration_files:
                 logger.info("No migration files found")
@@ -169,9 +175,14 @@ class MigrationRunner:
                     success_count += 1
                 else:
                     fail_count += 1
-            
+
+            if success_count > 0:
+                with self.conn.cursor() as cur:
+                    cur.execute("NOTIFY pgrst, 'reload schema';")
+                logger.info("Requested PostgREST schema reload")
+
             logger.info(f"Migration summary: {success_count} successful, {fail_count} failed")
-            
+
             return fail_count == 0
             
         finally:

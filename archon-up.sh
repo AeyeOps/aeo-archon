@@ -4,11 +4,13 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$ROOT_DIR/.env"
 COMPOSE_FILES="-f docker-compose.images.yml"
+SUPABASE_DIR="$ROOT_DIR/supabase"
 
 default_observability="compose"
 default_agents=1
 default_single_port=1
 skip_verify=0
+run_migrations=1
 
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
   COMPOSE="docker compose"
@@ -34,9 +36,10 @@ while [[ $# -gt 0 ]]; do
     --single-port) enable_single_port=1; shift;;
     --no-single-port) enable_single_port=0; shift;;
     --no-verify) skip_verify=1; shift;;
+    --no-migrations) run_migrations=0; shift;;
     -h|--help)
       cat <<EOF
-Usage: $(basename "$0") [--host <ip>] [--observability compose|script|none] [--no-agents] [--no-single-port] [--no-verify]
+Usage: $(basename "$0") [--host <ip>] [--observability compose|script|none] [--no-agents] [--no-single-port] [--no-verify] [--no-migrations]
 EOF
       exit 0;;
     *) err "Unknown option: $1"; exit 1;;
@@ -49,16 +52,96 @@ upsert_env(){ local k="$1"; local v="$2"; local tmp="$ENV_FILE.tmp"; awk -v k="$
 merge_csv_unique(){ local csv="$1"; local item="$2"; awk -v csv="$csv" -v item="$item" 'BEGIN{ n=split(csv,a,/[ ,]+/); for(i=1;i<=n;i++) if(length(a[i])) { if(!s[a[i]]) { s[a[i]]=1; o[++m]=a[i] } } if(length(item)&&!s[item]) o[++m]=item; for(i=1;i<=m;i++){ if(i>1) printf ","; printf "%s", o[i] } printf "\n" }'; }
 upsert_if_empty(){ local k="$1"; local v="$2"; if ! grep -q "^${k}=" "$ENV_FILE" || grep -q "^${k}=\s*$" "$ENV_FILE"; then upsert_env "$k" "$v"; fi }
 
-# Required images
-req=(ARCHON_SERVER_IMAGE ARCHON_MCP_IMAGE ARCHON_FRONTEND_IMAGE)
-[[ $enable_agents -eq 1 ]] && req+=(ARCHON_AGENTS_IMAGE)
-for v in "${req[@]}"; do
-  if ! grep -q "^$v=" "$ENV_FILE" || grep -q "^$v=\s*$" "$ENV_FILE"; then err "$v not set in .env"; exit 1; fi
-done
-# Required Supabase
-for v in SUPABASE_URL SUPABASE_SERVICE_KEY; do
-  if ! grep -q "^$v=" "$ENV_FILE" || grep -q "^$v=\s*$" "$ENV_FILE"; then err "$v missing in .env"; exit 1; fi
-done
+wait_for_supabase_ready(){
+  local kong_container="$1"
+  local attempts=30
+  local url="http://${kong_container}:8000/rest/v1/?select=*"
+  for attempt in $(seq 1 $attempts); do
+    # Use lightweight curl container to avoid relying on host binaries
+    status=$(docker run --rm --network supabase_network_supabase curlimages/curl:8.8.0 -s -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || true)
+    if [[ -n "$status" && "$status" != "000" ]]; then
+      ok "Supabase API reachable (HTTP $status)"
+      return 0
+    fi
+    sleep 2
+  done
+  err "Supabase API not reachable at $url after $attempts attempts"; exit 1
+}
+
+wait_for_supabase_table(){
+  local kong_container="$1"
+  local table="$2"
+  local api_key="$3"
+  local attempts=30
+  local url="http://${kong_container}:8000/rest/v1/${table}?select=*"
+  for attempt in $(seq 1 $attempts); do
+    status=$(docker run --rm --network supabase_network_supabase \
+      curlimages/curl:8.8.0 -s -o /dev/null -w '%{http_code}' -H "apikey: $api_key" "$url" 2>/dev/null || true)
+    if [[ "$status" == "200" ]]; then
+      ok "Supabase table ${table} reachable"
+      return 0
+    fi
+    sleep 2
+  done
+  err "Supabase table ${table} not reachable at $url"; exit 1
+}
+
+# Populate essential defaults non-interactively (idempotent)
+upsert_if_empty HOST "localhost"
+upsert_if_empty ARCHON_SERVER_PORT "8181"
+upsert_if_empty ARCHON_MCP_PORT "8051"
+upsert_if_empty ARCHON_AGENTS_PORT "8052"
+upsert_if_empty ARCHON_UI_PORT "3737"
+upsert_if_empty VITE_SHOW_DEVTOOLS "false"
+upsert_if_empty OTEL_EXPORTER_OTLP_ENDPOINT "http://localhost:4318"
+upsert_if_empty OTEL_EXPORTER_OTLP_PROTOCOL "http/protobuf"
+upsert_if_empty OTEL_EXPORTER_OTLP_ENDPOINT_CONTAINER "http://openobserve:4318"
+upsert_if_empty OTEL_TRACES_EXPORTER "otlp"
+upsert_if_empty OTEL_LOGS_EXPORTER "otlp"
+upsert_if_empty OTEL_METRICS_EXPORTER "otlp"
+upsert_if_empty OTEL_TRACES_SAMPLER "always_on"
+upsert_if_empty OTEL_SERVICE_NAME_ARCHON_SERVER "archon-server"
+upsert_if_empty OTEL_SERVICE_NAME_ARCHON_MCP "archon-mcp"
+upsert_if_empty OTEL_SERVICE_NAME_ARCHON_AGENTS "archon-agents"
+[[ $enable_agents -eq 1 ]] && upsert_env AGENTS_ENABLED true || upsert_env AGENTS_ENABLED false
+
+# Default images (idempotent). Compose fails fast if not present locally or pullable.
+upsert_if_empty ARCHON_SERVER_IMAGE "archon-archon-server:latest"
+upsert_if_empty ARCHON_MCP_IMAGE "archon-archon-mcp:latest"
+upsert_if_empty ARCHON_FRONTEND_IMAGE "archon-archon-frontend:latest"
+[[ $enable_agents -eq 1 ]] && upsert_if_empty ARCHON_AGENTS_IMAGE "archon-archon-agents:latest" || true
+
+# Ensure Supabase via Supabase CLI (npx) and populate .env. Fail fast if unavailable.
+ensure_supabase_env(){
+  command -v npx >/dev/null 2>&1 || { err "npx not found. Install Node.js (>=18) to use supabase CLI"; exit 1; }
+  mkdir -p "$SUPABASE_DIR"
+  pushd "$SUPABASE_DIR" >/dev/null
+  # Supabase CLI keeps config under ./supabase/config.toml
+  if [[ ! -f "supabase/config.toml" ]]; then
+    npx -y supabase@latest init || { err "Failed to initialize Supabase CLI project"; exit 1; }
+  fi
+  npx -y supabase@latest start || { err "Failed to start local Supabase via CLI"; exit 1; }
+  # Query status in env format and parse required values
+  STATUS_ENV=$(npx -y supabase@latest status -o env) || { err "Failed to get Supabase status"; exit 1; }
+  SERVICE_ROLE_KEY=$(echo "$STATUS_ENV" | awk -F'=' '/^SERVICE_ROLE_KEY/{gsub(/\"/,"",$2); print $2}')
+  API_URL=$(echo "$STATUS_ENV" | awk -F'=' '/^API_URL/{gsub(/\"/,"",$2); print $2}')
+  popd >/dev/null
+  if [[ -z "$SERVICE_ROLE_KEY" || -z "$API_URL" ]]; then
+    err "Supabase status missing SERVICE_ROLE_KEY or API_URL; cannot continue"; exit 1
+  fi
+  upsert_env SUPABASE_URL "$API_URL"
+  SUPABASE_KONG=$(docker ps --format '{{.Names}}' | grep -m1 'supabase_kong' || true)
+  if [[ -n "$SUPABASE_KONG" ]]; then
+    upsert_env SUPABASE_URL_CONTAINER "http://$SUPABASE_KONG:8000"
+    wait_for_supabase_ready "$SUPABASE_KONG"
+  else
+    upsert_env SUPABASE_URL_CONTAINER "http://host.docker.internal:54321"
+  fi
+  upsert_env SUPABASE_SERVICE_KEY "$SERVICE_ROLE_KEY"
+  ok "Supabase configured via supabase CLI"
+}
+
+ensure_supabase_env
 
 # Host handling
 if [[ -n "$HOST_OVERRIDE" ]]; then upsert_env HOST "$HOST_OVERRIDE"; fi
@@ -83,35 +166,124 @@ case "$observability" in
     ;;
   none) warn "Observability disabled" ;;
   *) err "Invalid observability: $observability"; exit 1;;
- esac
+esac
 
-# Start services
-$COMPOSE $COMPOSE_FILES up -d
-[[ "$observability" == "compose" && $SKIP_COMPOSE_OBS -eq 0 ]] && $COMPOSE $COMPOSE_FILES --profile observability up -d || true
-[[ $enable_agents -eq 1 ]] && $COMPOSE $COMPOSE_FILES --profile agents up -d || true
+# Start services (prefer building from upstream source if available)
+ARCHON_SRC_DIR="$ROOT_DIR/archon-src"
+if [[ ! -f "$ARCHON_SRC_DIR/docker-compose.yml" ]]; then
+  if [[ -x "$ROOT_DIR/bootstrap-from-source.sh" ]]; then
+    bash "$ROOT_DIR/bootstrap-from-source.sh" --no-start
+  else
+    err "archon-src not found and bootstrap-from-source.sh missing"; exit 1
+  fi
+fi
 
-# Attach existing openobserve to network if needed
-if [[ "$observability" == "compose" && $SKIP_COMPOSE_OBS -eq 1 ]]; then
-  docker start openobserve >/dev/null 2>&1 || true
-  NET_NAME="$(docker network ls --format '{{.Name}}' | grep -E '_app-network$' | head -n1 || true)"; NET_NAME=${NET_NAME:-aeo-archon_app-network}
-  docker network connect "$NET_NAME" openobserve >/dev/null 2>&1 || true
+# Sync Supabase settings into archon-src/.env
+SRC_ENV="$ARCHON_SRC_DIR/.env"
+upsert_src_env(){ local k="$1"; local v="$2"; local tmp="$SRC_ENV.tmp"; awk -v k="$k" -v v="$v" 'BEGIN{done=0}{ if(!done && $0 ~ "^" k "=") { print k"="v; done=1 } else { print $0 } } END{ if(!done) print k"="v }' "$SRC_ENV" > "$tmp"; mv "$tmp" "$SRC_ENV"; }
+CONTAINER_SUPABASE_URL=$(grep -E '^SUPABASE_URL_CONTAINER=' "$ENV_FILE" | sed 's/^SUPABASE_URL_CONTAINER=//' | tr -d '\r')
+if [[ -n "$CONTAINER_SUPABASE_URL" ]]; then
+  upsert_src_env SUPABASE_URL "$CONTAINER_SUPABASE_URL"
+else
+  upsert_src_env SUPABASE_URL "$(grep -E '^SUPABASE_URL=' "$ENV_FILE" | sed 's/^SUPABASE_URL=//' | tr -d '\r')"
+fi
+SUPABASE_SERVICE_KEY_VAL="$(grep -E '^SUPABASE_SERVICE_KEY=' "$ENV_FILE" | sed 's/^SUPABASE_SERVICE_KEY=//')"
+upsert_src_env SUPABASE_SERVICE_KEY "$SUPABASE_SERVICE_KEY_VAL"
+upsert_src_env HOST "$(grep -E '^HOST=' "$ENV_FILE" | sed 's/^HOST=//')"
+upsert_src_env ARCHON_SERVER_PORT "$(grep -E '^ARCHON_SERVER_PORT=' "$ENV_FILE" | sed 's/^ARCHON_SERVER_PORT=//')"
+upsert_src_env ARCHON_MCP_PORT "$(grep -E '^ARCHON_MCP_PORT=' "$ENV_FILE" | sed 's/^ARCHON_MCP_PORT=//')"
+upsert_src_env ARCHON_AGENTS_PORT "$(grep -E '^ARCHON_AGENTS_PORT=' "$ENV_FILE" | sed 's/^ARCHON_AGENTS_PORT=//')"
+upsert_src_env ARCHON_UI_PORT "$(grep -E '^ARCHON_UI_PORT=' "$ENV_FILE" | sed 's/^ARCHON_UI_PORT=//')"
+
+# Run database migrations (idempotent, optional) before starting services
+if [[ $run_migrations -eq 1 ]]; then
+  echo "Running database migrations..."
+  DB_CONTAINER=$(docker ps --format '{{.Names}}' | grep -m1 'supabase_db' || true)
+  DB_HOST=${DB_CONTAINER:-supabase_db_supabase}
+  DB_PORT=5432; DB_USER=postgres; DB_PASSWORD=postgres; DB_NAME=postgres
+  for i in {1..30}; do
+    if docker run --rm --network supabase_network_supabase -e PGPASSWORD="$DB_PASSWORD" postgres:15-alpine pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" >/dev/null 2>&1; then
+      ok "Database reachable"
+      break
+    fi
+    sleep 2
+    [[ $i -eq 30 ]] && err "Database not reachable on $DB_HOST:$DB_PORT; failing fast" && exit 1
+  done
+  docker run --rm --network supabase_network_supabase \
+    -e DB_HOST="$DB_HOST" -e DB_PORT="$DB_PORT" -e DB_USER="$DB_USER" -e DB_PASSWORD="$DB_PASSWORD" -e DB_NAME="$DB_NAME" \
+    -v "$ROOT_DIR":/work -w /work \
+    python:3.12-slim bash -lc "pip install -q psycopg2-binary && python migration/run_migrations.py" \
+    && ok "Migrations applied"
+  if [[ -n "$SUPABASE_KONG" ]]; then
+    wait_for_supabase_table "$SUPABASE_KONG" "archon_settings" "$SUPABASE_SERVICE_KEY_VAL"
+  fi
+fi
+
+# Bring up upstream Archon stack
+( cd "$ARCHON_SRC_DIR" && docker compose up --build -d ) || { err "Failed to build or start archon from source"; exit 1; }
+
+if [[ $enable_agents -eq 1 ]]; then
+  ( cd "$ARCHON_SRC_DIR" && docker compose --profile agents up -d ) || warn "Agents profile failed to start"
+fi
+
+# Start observability locally (separate compose)
+if [[ "$observability" == "compose" ]]; then
+  if [[ $SKIP_COMPOSE_OBS -eq 0 ]]; then
+    $COMPOSE $COMPOSE_FILES up -d openobserve || warn "OpenObserve failed to start"
+  else
+    docker start openobserve >/dev/null 2>&1 || true
+  fi
+  NET_NAME="$(docker network ls --format '{{.Name}}' | grep -E 'archon-src_app-network$' | head -n1 || true)"
+  if [[ -n "$NET_NAME" ]]; then
+    docker network connect "$NET_NAME" openobserve >/dev/null 2>&1 || true
+  fi
 fi
 
 # Verify
 check(){ curl -fsS -o /dev/null -m 5 "$1" >/dev/null 2>&1; }
+check_service(){
+  local label="$1"; local url="$2"; local attempts=${3:-10}; local delay=${4:-3}; local success_codes="${5:-200}"
+  for attempt in $(seq 1 "$attempts"); do
+    status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$url" 2>/dev/null || echo "000")
+    if [[ " $success_codes " == *" $status "* ]]; then
+      ok "$label ready"
+      return 0
+    fi
+    sleep "$delay"
+  done
+  warn "$label not ready"
+  return 1
+}
 if [[ $skip_verify -eq 0 ]]; then
   UI_PORT=$(grep -E '^ARCHON_UI_PORT=' "$ENV_FILE" | sed 's/^ARCHON_UI_PORT=//;s/\r$//'); UI_PORT=${UI_PORT:-3737}
   API_PORT=$(grep -E '^ARCHON_SERVER_PORT=' "$ENV_FILE" | sed 's/^ARCHON_SERVER_PORT=//;s/\r$//'); API_PORT=${API_PORT:-8181}
   MCP_PORT=$(grep -E '^ARCHON_MCP_PORT=' "$ENV_FILE" | sed 's/^ARCHON_MCP_PORT=//;s/\r$//'); MCP_PORT=${MCP_PORT:-8051}
   AGENTS_PORT=$(grep -E '^ARCHON_AGENTS_PORT=' "$ENV_FILE" | sed 's/^ARCHON_AGENTS_PORT=//;s/\r$//'); AGENTS_PORT=${AGENTS_PORT:-8052}
   PROD=$(grep -E '^PROD=' "$ENV_FILE" | sed 's/^PROD=//;s/\r$//')
-  check "http://$HOST_VAL:$UI_PORT" && ok "UI ready" || warn "UI not ready"
-  check "http://$HOST_VAL:$API_PORT/health" && ok "API ready" || warn "API not ready"
-  [[ "$PROD" == "true" ]] && check "http://$HOST_VAL:$UI_PORT/api/health" && ok "API via UI ready" || true
-  check "http://$HOST_VAL:$MCP_PORT/health" && ok "MCP ready" || warn "MCP not ready"
-  [[ $enable_agents -eq 1 ]] && check "http://$HOST_VAL:$AGENTS_PORT/health" && ok "Agents ready" || true
-  check "http://$HOST_VAL:5080/" && ok "OpenObserve UI reachable" || warn "OpenObserve UI not reachable (optional)"
+  CHECK_HOST="localhost"
+  check_service "UI" "http://$CHECK_HOST:$UI_PORT"
+  check_service "API" "http://$CHECK_HOST:$API_PORT/health"
+  if [[ "$PROD" == "true" ]]; then
+    check_service "API via UI" "http://$CHECK_HOST:$UI_PORT/api/health"
+  fi
+  check_service "MCP" "http://$CHECK_HOST:$MCP_PORT/health" 20 3 "200 404"
+  if [[ $enable_agents -eq 1 ]]; then
+    check_service "Agents" "http://$CHECK_HOST:$AGENTS_PORT/health" 20 3
+  fi
+  if [[ "$observability" != "none" ]]; then
+    check_service "OpenObserve UI" "http://$CHECK_HOST:5080/"
+  fi
 fi
+
+UI_PORT=${UI_PORT:-$(grep -E '^ARCHON_UI_PORT=' "$ENV_FILE" | sed 's/^ARCHON_UI_PORT=//;s/\r$//')}
+UI_PORT=${UI_PORT:-3737}
+API_PORT=${API_PORT:-$(grep -E '^ARCHON_SERVER_PORT=' "$ENV_FILE" | sed 's/^ARCHON_SERVER_PORT=//;s/\r$//')}
+API_PORT=${API_PORT:-8181}
+MCP_PORT=${MCP_PORT:-$(grep -E '^ARCHON_MCP_PORT=' "$ENV_FILE" | sed 's/^ARCHON_MCP_PORT=//;s/\r$//')}
+MCP_PORT=${MCP_PORT:-8051}
+AGENTS_PORT=${AGENTS_PORT:-$(grep -E '^ARCHON_AGENTS_PORT=' "$ENV_FILE" | sed 's/^ARCHON_AGENTS_PORT=//;s/\r$//')}
+AGENTS_PORT=${AGENTS_PORT:-8052}
+PROD=${PROD:-$(grep -E '^PROD=' "$ENV_FILE" | sed 's/^PROD=//;s/\r$//')}
 
 echo -e "${GREEN}Done. Access:${NC}"
 echo "- UI:  http://$HOST_VAL:$UI_PORT"
