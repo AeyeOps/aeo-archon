@@ -5,6 +5,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$ROOT_DIR/.env"
 COMPOSE_FILES="-f docker-compose.images.yml"
 SUPABASE_DIR="$ROOT_DIR/supabase"
+ARCHON_SRC_DIR_DEFAULT="${ARCHON_SRC_DIR_OVERRIDE:-/opt/aeo/archon-src}"
+ARCHON_SRC_BRANCH_DEFAULT="${ARCHON_SRC_BRANCH_OVERRIDE:-aeyeops/custom-main}"
+ARCHON_SRC_DIR="$ARCHON_SRC_DIR_DEFAULT"
+ARCHON_SRC_BRANCH="$ARCHON_SRC_BRANCH_DEFAULT"
 
 default_observability="compose"
 default_agents=1
@@ -182,13 +186,23 @@ case "$observability" in
 esac
 
 # Start services (prefer building from upstream source if available)
-ARCHON_SRC_DIR="$ROOT_DIR/archon-src"
 if [[ ! -f "$ARCHON_SRC_DIR/docker-compose.yml" ]]; then
   if [[ -x "$ROOT_DIR/bootstrap-from-source.sh" ]]; then
-    bash "$ROOT_DIR/bootstrap-from-source.sh" --no-start
+    bash "$ROOT_DIR/bootstrap-from-source.sh" --dir "$ARCHON_SRC_DIR" --branch "$ARCHON_SRC_BRANCH" --no-start
   else
     err "archon-src not found and bootstrap-from-source.sh missing"; exit 1
   fi
+fi
+
+if [[ -d "$ARCHON_SRC_DIR/.git" ]]; then
+  CURRENT_BRANCH=$(git -C "$ARCHON_SRC_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+  if [[ "$CURRENT_BRANCH" != "$ARCHON_SRC_BRANCH" ]]; then
+    warn "archon-src checked out to $CURRENT_BRANCH (expected $ARCHON_SRC_BRANCH). Using current branch."
+  else
+    ok "archon-src on $ARCHON_SRC_BRANCH"
+  fi
+else
+  warn "archon-src does not appear to be a git repository; continuing"
 fi
 
 # Sync Supabase settings into archon-src/.env

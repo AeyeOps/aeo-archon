@@ -91,7 +91,7 @@ if [[ "$CURRENT_USER" != "root" ]]; then
   fi
 fi
 
-NODE_VERSION_REQUIRED="22"
+NODE_VERSION_REQUIRED="${NODE_VERSION_REQUIRED:-lts/*}"
 if [[ "$CURRENT_USER" == "root" ]]; then
   USER_HOME="/root"
 else
@@ -107,11 +107,10 @@ else
 fi
 
 su - "$CURRENT_USER" -c "export NVM_DIR='$NVM_DIR'; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm install $NODE_VERSION_REQUIRED > /dev/null"
-ok "Node.js $NODE_VERSION_REQUIRED ensured"
+ok "Node.js $(su - "$CURRENT_USER" -c "export NVM_DIR='$NVM_DIR'; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm current") ensured"
 
 su - "$CURRENT_USER" -c "export NVM_DIR='$NVM_DIR'; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npx --yes supabase@latest --help >/dev/null"
 ok "npx supabase@latest available"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 su - "$CURRENT_USER" -c "cd '$SCRIPT_DIR' && ./archon-up.sh"
-

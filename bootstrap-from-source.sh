@@ -4,15 +4,16 @@
 #   ./bootstrap-from-source.sh [--repo <url>] [--branch <name>] [--dir <path>] [--no-start]
 # Defaults:
 #   repo: https://github.com/coleam00/archon.git
-#   branch: main
-#   dir: ./archon-src
+#   branch: aeyeops/custom-main
+#   dir: /opt/aeo/archon-src
 
 set -Eeuo pipefail
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ARCHON_REPO_URL="https://github.com/coleam00/archon.git"
-ARCHON_BRANCH="main"
-ARCHON_SRC_DIR="$ROOT_DIR/archon-src"
+ARCHON_REPO_URL="${ARCHON_REPO_URL:-https://github.com/coleam00/archon.git}"
+ARCHON_BRANCH="${ARCHON_BRANCH:-aeyeops/custom-main}"
+ARCHON_SRC_DIR_DEFAULT="${ARCHON_SRC_DIR_OVERRIDE:-/opt/aeo/archon-src}"
+ARCHON_SRC_DIR="$ARCHON_SRC_DIR_DEFAULT"
 DO_START=1
 
 ok(){ echo -e "${GREEN}✓${NC} $1"; }
@@ -37,11 +38,22 @@ done
 command -v git >/dev/null 2>&1 || { err "git not found"; exit 1; }
 
 if [[ -d "$ARCHON_SRC_DIR/.git" ]]; then
-  echo "Repo exists at $ARCHON_SRC_DIR; updating..."
-  git -C "$ARCHON_SRC_DIR" fetch --all --prune
-  git -C "$ARCHON_SRC_DIR" checkout "$ARCHON_BRANCH"
-  git -C "$ARCHON_SRC_DIR" pull --ff-only origin "$ARCHON_BRANCH"
-  ok "Repository updated"
+  echo "Repo exists at $ARCHON_SRC_DIR; ensuring branch $ARCHON_BRANCH..."
+  CURRENT_BRANCH=$(git -C "$ARCHON_SRC_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+  if [[ "$CURRENT_BRANCH" != "$ARCHON_BRANCH" ]]; then
+    git -C "$ARCHON_SRC_DIR" fetch --all --prune || warn "Fetch failed; continuing with existing refs"
+    if ! git -C "$ARCHON_SRC_DIR" checkout "$ARCHON_BRANCH"; then
+      err "Unable to checkout $ARCHON_BRANCH"; exit 1
+    fi
+    CURRENT_BRANCH="$ARCHON_BRANCH"
+  fi
+  if git -C "$ARCHON_SRC_DIR" diff --quiet --ignore-submodules && [[ -z "$(git -C "$ARCHON_SRC_DIR" status --porcelain)" ]]; then
+    git -C "$ARCHON_SRC_DIR" fetch origin "$ARCHON_BRANCH" --prune || warn "Origin fetch failed"
+    git -C "$ARCHON_SRC_DIR" pull --ff-only origin "$ARCHON_BRANCH" || warn "Fast-forward pull skipped (non-FF or network issue)"
+    ok "Repository updated"
+  else
+    warn "Local changes detected in $ARCHON_SRC_DIR; skipping auto-update"
+  fi
 else
   echo "Cloning $ARCHON_REPO_URL into $ARCHON_SRC_DIR..."
   git clone --depth 1 --branch "$ARCHON_BRANCH" "$ARCHON_REPO_URL" "$ARCHON_SRC_DIR"
@@ -59,37 +71,12 @@ fi
 # Helper to upsert k=v into .env
 upsert_env(){ local envf="$1"; local k="$2"; local v="$3"; local tmp="$envf.tmp"; awk -v k="$k" -v v="$v" 'BEGIN{done=0}{ if(!done && $0 ~ "^" k "=") { print k"="v; done=1 } else { print $0 } } END{ if(!done) print k"="v }' "$envf" > "$tmp"; mv "$tmp" "$envf"; }
 
-# Try to populate Supabase settings from local Supabase CLI project
-SUPA_ENV_CANDIDATES=("$ROOT_DIR/supabase/.env" "$ARCHON_SRC_DIR/supabase/.env")
-SUPABASE_URL_DEFAULT="http://127.0.0.1:54321"
-SUPABASE_URL_CONTAINER_DEFAULT="http://host.docker.internal:54321"
-FOUND_SUPA=0
-for f in "${SUPA_ENV_CANDIDATES[@]}"; do
-  if [[ -f "$f" ]]; then
-    set -a; # shellcheck disable=SC1090
-    source "$f"; set +a
-    if [[ -n "${SERVICE_ROLE_KEY:-}" ]]; then
-      upsert_env "$REPO_ENV" SUPABASE_URL "$SUPABASE_URL_DEFAULT"
-      upsert_env "$REPO_ENV" SUPABASE_URL_CONTAINER "$SUPABASE_URL_CONTAINER_DEFAULT"
-      upsert_env "$REPO_ENV" SUPABASE_SERVICE_KEY "$SERVICE_ROLE_KEY"
-      ok "Supabase settings populated from $(realpath "$f")"
-      FOUND_SUPA=1
-      break
-    fi
-  fi
-
-done
-
-if [[ $FOUND_SUPA -eq 0 ]]; then
-  warn "Supabase CLI env not found; you can run: (cd $ARCHON_SRC_DIR && npx supabase@latest init && npx supabase start)"
-fi
-
 # Ensure launcher is executable
 chmod +x "$ARCHON_SRC_DIR/archon-up.sh" 2>/dev/null || true
 
 if [[ $DO_START -eq 1 ]]; then
   echo "Starting Archon from source..."
-  ( cd "$ARCHON_SRC_DIR" && bash ./archon-up.sh )
+  ( cd "$ROOT_DIR" && bash ./archon-up.sh )
 else
-  ok "Bootstrap complete. To start: (cd $ARCHON_SRC_DIR && bash ./archon-up.sh)"
+  ok "Bootstrap complete. To start: (cd $ROOT_DIR && bash ./archon-up.sh)"
 fi
