@@ -20,7 +20,8 @@ class MigrationRunner:
     def __init__(self, db_config):
         self.db_config = db_config
         self.conn = None
-        self.migrations_dir = Path(__file__).parent
+        # Point to archon-src migration directory for single source of truth
+        self.migrations_dir = Path("/opt/aeo/archon-src/migration")
         
     def connect(self):
         """Connect to the database"""
@@ -152,14 +153,28 @@ class MigrationRunner:
         try:
             self.create_migrations_table()
 
-            # Get all SQL files in migrations directory
+            # Get all SQL files in migrations directory and subdirectories
             def sort_key(path: Path):
                 name = path.name
+                # complete_setup.sql runs first
                 if name == "complete_setup.sql":
-                    return (0, name)
-                return (1, name)
+                    return (0, "", name)
+                # Then numbered migrations in 0.1.0 subdirectory
+                if "0.1.0" in str(path):
+                    return (1, str(path.parent), name)
+                # Everything else alphabetically
+                return (2, str(path.parent), name)
 
-            migration_files = sorted(self.migrations_dir.glob("*.sql"), key=sort_key)
+            # Collect all migration files, avoiding duplicates
+            all_files = set()
+            # Add root-level SQL files (like complete_setup.sql)
+            all_files.update(self.migrations_dir.glob("*.sql"))
+            # Add subdirectory SQL files (like 0.1.0/001_*.sql)
+            for subdir in self.migrations_dir.iterdir():
+                if subdir.is_dir():
+                    all_files.update(subdir.glob("*.sql"))
+
+            migration_files = sorted(all_files, key=sort_key)
             
             if not migration_files:
                 logger.info("No migration files found")

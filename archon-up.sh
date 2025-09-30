@@ -187,10 +187,10 @@ esac
 
 # Start services (prefer building from upstream source if available)
 if [[ ! -f "$ARCHON_SRC_DIR/docker-compose.yml" ]]; then
-  if [[ -x "$ROOT_DIR/bootstrap-from-source.sh" ]]; then
-    bash "$ROOT_DIR/bootstrap-from-source.sh" --dir "$ARCHON_SRC_DIR" --branch "$ARCHON_SRC_BRANCH" --no-start
+  if [[ -x "$ROOT_DIR/bootstrap-archon.sh" ]]; then
+    bash "$ROOT_DIR/bootstrap-archon.sh" --dir "$ARCHON_SRC_DIR" --branch "$ARCHON_SRC_BRANCH" --no-start
   else
-    err "archon-src not found and bootstrap-from-source.sh missing"; exit 1
+    err "archon-src not found and bootstrap-archon.sh missing"; exit 1
   fi
 fi
 
