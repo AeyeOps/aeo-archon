@@ -20,8 +20,8 @@ class MigrationRunner:
     def __init__(self, db_config):
         self.db_config = db_config
         self.conn = None
-        # Point to archon-src migration directory for single source of truth
-        self.migrations_dir = Path("/opt/aeo/archon-src/migration")
+        # Use local migration directory (files copied from archon-src at runtime)
+        self.migrations_dir = Path(__file__).parent
         
     def connect(self):
         """Connect to the database"""

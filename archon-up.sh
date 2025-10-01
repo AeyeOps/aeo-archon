@@ -225,6 +225,18 @@ upsert_src_env ARCHON_UI_PORT "$(grep -E '^ARCHON_UI_PORT=' "$ENV_FILE" | sed 's
 # Run database migrations (idempotent, optional) before starting services
 if [[ $run_migrations -eq 1 ]]; then
   echo "Running database migrations..."
+
+  # Copy fresh migration files from archon-src
+  if [[ -d "$ROOT_DIR/../archon-src/migration" ]]; then
+    echo "Copying migration files from archon-src..."
+    mkdir -p "$ROOT_DIR/migration/0.1.0"
+    cp -f "$ROOT_DIR/../archon-src/migration"/*.sql "$ROOT_DIR/migration/" 2>/dev/null || true
+    cp -f "$ROOT_DIR/../archon-src/migration/0.1.0"/*.sql "$ROOT_DIR/migration/0.1.0/" 2>/dev/null || true
+    ok "Migration files copied"
+  else
+    warn "archon-src not found, using existing migration files"
+  fi
+
   DB_CONTAINER=$(docker ps --format '{{.Names}}' | grep -m1 'supabase_db' || true)
   DB_HOST=${DB_CONTAINER:-supabase_db_supabase}
   DB_PORT=5432; DB_USER=postgres; DB_PASSWORD=postgres; DB_NAME=postgres

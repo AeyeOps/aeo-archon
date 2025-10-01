@@ -23,3 +23,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 *.pyc
+
+# Migration files (copied from archon-src at runtime)
+migration/*.sql
+migration/0.1.0/
