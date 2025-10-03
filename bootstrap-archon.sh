@@ -26,6 +26,7 @@ ARCHON_SRC_DIR_DEFAULT="${ARCHON_SRC_DIR_OVERRIDE:-/opt/aeo/archon-src}"
 ARCHON_SRC_DIR="$ARCHON_SRC_DIR_DEFAULT"
 NODE_VERSION_REQUIRED="${NODE_VERSION_REQUIRED:-lts/*}"
 DO_START=1
+FRESH_INSTALL=0
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -34,9 +35,10 @@ while [[ $# -gt 0 ]]; do
     --branch) ARCHON_BRANCH="${2:-}"; shift 2;;
     --dir) ARCHON_SRC_DIR="${2:-}"; shift 2;;
     --no-start) DO_START=0; shift;;
+    --fresh) FRESH_INSTALL=1; shift;;
     -h|--help)
       cat <<EOF
-Usage: $(basename "$0") [--repo <url>] [--branch <name>] [--dir <path>] [--no-start]
+Usage: $(basename "$0") [--repo <url>] [--branch <name>] [--dir <path>] [--no-start] [--fresh]
 
 Bootstrap Archon by installing system prerequisites, cloning/updating repository, and launching.
 
@@ -45,6 +47,7 @@ Options:
   --branch <name> Git branch name (default: aeyeops/custom-main)
   --dir <path>    Installation directory (default: /opt/aeo/archon-src)
   --no-start      Skip launching after bootstrap
+  --fresh         Perform fresh database install (wipe and reinstall schema)
   -h, --help      Show this help message
 
 Environment Variables:
@@ -227,8 +230,12 @@ chmod +x "$ARCHON_SRC_DIR/archon-up.sh" 2>/dev/null || true
 if [[ $DO_START -eq 1 ]]; then
   echo ""
   echo "==> Phase 3: Starting Archon stack"
-  su - "$CURRENT_USER" -c "cd '$ROOT_DIR' && bash ./archon-up.sh"
+  ARCHON_UP_ARGS=""
+  [[ $FRESH_INSTALL -eq 1 ]] && ARCHON_UP_ARGS="--fresh"
+  su - "$CURRENT_USER" -c "cd '$ROOT_DIR' && bash ./archon-up.sh $ARCHON_UP_ARGS"
 else
   echo ""
-  ok "Bootstrap complete. To start: (cd $ROOT_DIR && bash ./archon-up.sh)"
+  FRESH_MSG=""
+  [[ $FRESH_INSTALL -eq 1 ]] && FRESH_MSG=" --fresh"
+  ok "Bootstrap complete. To start: (cd $ROOT_DIR && bash ./archon-up.sh$FRESH_MSG)"
 fi

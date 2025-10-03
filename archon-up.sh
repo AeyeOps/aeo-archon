@@ -15,6 +15,7 @@ default_agents=1
 default_single_port=1
 skip_verify=0
 run_migrations=1
+fresh_install=0
 
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
   COMPOSE="docker compose"
@@ -41,9 +42,12 @@ while [[ $# -gt 0 ]]; do
     --no-single-port) enable_single_port=0; shift;;
     --no-verify) skip_verify=1; shift;;
     --no-migrations) run_migrations=0; shift;;
+    --fresh) fresh_install=1; shift;;
     -h|--help)
       cat <<EOF
-Usage: $(basename "$0") [--host <ip>] [--observability compose|script|none] [--no-agents] [--no-single-port] [--no-verify] [--no-migrations]
+Usage: $(basename "$0") [--host <ip>] [--observability compose|script|none] [--no-agents] [--no-single-port] [--no-verify] [--no-migrations] [--fresh]
+Options:
+  --fresh         Perform fresh database install (wipe and reinstall schema)
 EOF
       exit 0;;
     *) err "Unknown option: $1"; exit 1;;
@@ -230,6 +234,7 @@ if [[ $run_migrations -eq 1 ]]; then
   if [[ -d "$ROOT_DIR/../archon-src/migration" ]]; then
     echo "Copying migration files from archon-src..."
     mkdir -p "$ROOT_DIR/migration/0.1.0"
+    # Copy all SQL files (run_migrations.py handles filtering utility scripts)
     cp -f "$ROOT_DIR/../archon-src/migration"/*.sql "$ROOT_DIR/migration/" 2>/dev/null || true
     cp -f "$ROOT_DIR/../archon-src/migration/0.1.0"/*.sql "$ROOT_DIR/migration/0.1.0/" 2>/dev/null || true
     ok "Migration files copied"
@@ -248,11 +253,16 @@ if [[ $run_migrations -eq 1 ]]; then
     sleep 2
     [[ $i -eq 30 ]] && err "Database not reachable on $DB_HOST:$DB_PORT; failing fast" && exit 1
   done
+
+  # Run migrations (run_migrations.py handles complete_setup.sql and numbered migrations)
+  MIGRATION_ARGS=""
+  [[ $fresh_install -eq 1 ]] && MIGRATION_ARGS="--fresh" && warn "FRESH INSTALL: Database will be wiped and reinstalled!"
+
   docker run --rm --network supabase_network_supabase \
     -e DB_HOST="$DB_HOST" -e DB_PORT="$DB_PORT" -e DB_USER="$DB_USER" -e DB_PASSWORD="$DB_PASSWORD" -e DB_NAME="$DB_NAME" \
     -e PIP_ROOT_USER_ACTION=ignore -e PIP_DISABLE_PIP_VERSION_CHECK=1 \
     -v "$ROOT_DIR":/work -w /work \
-    python:3.12-slim bash -lc "pip install -q --upgrade pip && pip install -q psycopg2-binary && python migration/run_migrations.py" \
+    python:3.12-slim bash -lc "pip install -q --upgrade pip && pip install -q psycopg2-binary && python migration/run_migrations.py $MIGRATION_ARGS" \
     && ok "Migrations applied"
   if [[ -n "$SUPABASE_KONG" ]]; then
     wait_for_supabase_table "$SUPABASE_KONG" "archon_settings" "$SUPABASE_SERVICE_KEY_VAL"
