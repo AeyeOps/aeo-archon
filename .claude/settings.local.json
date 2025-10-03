@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(docker exec:*)"
+      "Bash(docker exec:*)",
+      "Bash(docker logs:*)",
+      "Read(//opt/aeo/**)",
+      "Bash(docker ps:*)"
     ],
     "deny": [],
     "ask": []
