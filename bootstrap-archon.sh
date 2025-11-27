@@ -175,6 +175,71 @@ su - "$CURRENT_USER" -c "export NVM_DIR='$NVM_DIR'; [ -s \"$NVM_DIR/nvm.sh\" ] &
 ok "npx supabase@latest available"
 
 # ============================================================================
+# PHASE 1.5: Stop Running Services (if any)
+# ============================================================================
+
+echo ""
+echo "==> Phase 1.5: Stopping running services"
+
+if [[ -x "$ROOT_DIR/stop-archon.sh" ]]; then
+  # Run as CURRENT_USER so NVM/npx is available for Supabase CLI
+  # Export ARCHON_SRC_DIR so stop script uses correct path
+  su - "$CURRENT_USER" -c "export ARCHON_SRC_DIR_OVERRIDE='$ARCHON_SRC_DIR'; cd '$ROOT_DIR' && bash ./stop-archon.sh"
+else
+  warn "stop-archon.sh not found; skipping service shutdown"
+fi
+
+# ============================================================================
+# PHASE 1.6: Sync Fork with Upstream (if repo exists)
+# ============================================================================
+
+echo ""
+echo "==> Phase 1.6: Syncing fork with upstream"
+
+if [[ -d "$ARCHON_SRC_DIR/.git" ]]; then
+  # Clean root-owned untracked files from previous Docker runs
+  # These prevent git operations like checkout and pull
+  CLEANUP_DIRS=(
+    ".claude"
+    "archon-example-workflow"
+    "archon-ui-main/src/features/agent-work-orders"
+    "archon-ui-main/src/features/progress"
+    "archon-ui-main/src/features/projects"
+    "archon-ui-main/src/features/style-guide"
+    "python/.claude"
+    "python/src/agent_work_orders"
+    "python/tests/agent_work_orders"
+    "PRPs"
+  )
+
+  for dir in "${CLEANUP_DIRS[@]}"; do
+    target="$ARCHON_SRC_DIR/$dir"
+    if [[ -d "$target" ]]; then
+      rm -rf "$target" 2>/dev/null || true
+    fi
+  done
+
+  # Restore any deleted tracked files
+  git -C "$ARCHON_SRC_DIR" checkout -- . 2>/dev/null || true
+
+  # Run sync-main.sh if available to sync fork with upstream
+  SYNC_SCRIPT="$ROOT_DIR/scripts/sync-main.sh"
+  if [[ -x "$SYNC_SCRIPT" ]]; then
+    echo "Running sync-main.sh to sync fork with upstream..."
+    if su - "$CURRENT_USER" -c "ARCHON_SRC_DIR='$ARCHON_SRC_DIR' bash '$SYNC_SCRIPT'"; then
+      ok "Fork synced with upstream"
+    else
+      warn "Fork sync failed - continuing with existing code"
+      warn "You may need to run: $SYNC_SCRIPT"
+    fi
+  else
+    warn "sync-main.sh not found at $SYNC_SCRIPT; skipping upstream sync"
+  fi
+else
+  ok "Repository not yet cloned; sync will happen after clone"
+fi
+
+# ============================================================================
 # PHASE 2: Repository Setup (can be done as non-root)
 # ============================================================================
 
@@ -187,17 +252,24 @@ if [[ -d "$ARCHON_SRC_DIR/.git" ]]; then
   CURRENT_BRANCH=$(git -C "$ARCHON_SRC_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
   if [[ "$CURRENT_BRANCH" != "$ARCHON_BRANCH" ]]; then
     git -C "$ARCHON_SRC_DIR" fetch --all --prune || warn "Fetch failed; continuing with existing refs"
+    # Clean untracked files that may conflict with branch checkout
+    git -C "$ARCHON_SRC_DIR" clean -fd 2>/dev/null || true
     if ! git -C "$ARCHON_SRC_DIR" checkout "$ARCHON_BRANCH"; then
       err "Unable to checkout $ARCHON_BRANCH"; exit 1
     fi
     CURRENT_BRANCH="$ARCHON_BRANCH"
   fi
   if git -C "$ARCHON_SRC_DIR" diff --quiet --ignore-submodules && [[ -z "$(git -C "$ARCHON_SRC_DIR" status --porcelain)" ]]; then
-    git -C "$ARCHON_SRC_DIR" fetch origin "$ARCHON_BRANCH" --prune || warn "Origin fetch failed"
-    git -C "$ARCHON_SRC_DIR" pull --ff-only origin "$ARCHON_BRANCH" || warn "Fast-forward pull skipped (non-FF or network issue)"
+    git -C "$ARCHON_SRC_DIR" fetch origin "$ARCHON_BRANCH" --prune || { err "Origin fetch failed - check network"; exit 1; }
+    if ! git -C "$ARCHON_SRC_DIR" pull --ff-only origin "$ARCHON_BRANCH"; then
+      err "Fast-forward pull failed. Upstream may have rebased."
+      err "To force update: cd $ARCHON_SRC_DIR && git reset --hard origin/$ARCHON_BRANCH"
+      exit 1
+    fi
     ok "Repository updated"
   else
     warn "Local changes detected in $ARCHON_SRC_DIR; skipping auto-update"
+    warn "To force update: cd $ARCHON_SRC_DIR && git stash && git pull"
   fi
 else
   echo "Cloning $ARCHON_REPO_URL into $ARCHON_SRC_DIR..."
@@ -220,8 +292,8 @@ if [[ ! -f "$REPO_ENV" ]]; then
   fi
 fi
 
-# Ensure launcher script is executable
-chmod +x "$ARCHON_SRC_DIR/archon-up.sh" 2>/dev/null || true
+# Ensure launcher scripts are executable
+chmod +x "$ROOT_DIR/archon-up.sh" "$ROOT_DIR/stop-archon.sh" "$ROOT_DIR/restart-archon-services.sh" 2>/dev/null || true
 
 # ============================================================================
 # PHASE 3: Launch Archon Stack
