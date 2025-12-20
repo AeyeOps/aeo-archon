@@ -16,7 +16,7 @@ stop_archon_containers(){
   # Stop archon-src containers if running
   if [[ -f "$ARCHON_SRC_DIR/docker-compose.yml" ]]; then
     echo "Stopping Archon containers..."
-    ( cd "$ARCHON_SRC_DIR" && docker compose down --remove-orphans 2>/dev/null ) && ok "Archon containers stopped" || warn "No Archon containers to stop"
+    ( cd "$ARCHON_SRC_DIR" && docker compose --profile agents down --remove-orphans 2>/dev/null ) && ok "Archon containers stopped" || warn "No Archon containers to stop"
   fi
   # Stop local compose services (openobserve, etc.)
   if [[ -f "$ROOT_DIR/docker-compose.images.yml" ]]; then

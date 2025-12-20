@@ -295,6 +295,11 @@ fi
 # Ensure launcher scripts are executable
 chmod +x "$ROOT_DIR/archon-up.sh" "$ROOT_DIR/stop-archon.sh" "$ROOT_DIR/restart-archon-services.sh" 2>/dev/null || true
 
+# Restore user ownership after root git operations
+if [[ "$CURRENT_USER" != "root" ]]; then
+  chown -R "$CURRENT_USER:$CURRENT_USER" "$ARCHON_SRC_DIR"
+fi
+
 # ============================================================================
 # PHASE 3: Launch Archon Stack
 # ============================================================================
