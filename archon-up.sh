@@ -12,6 +12,7 @@ ARCHON_SRC_BRANCH="$ARCHON_SRC_BRANCH_DEFAULT"
 
 default_observability="compose"
 default_agents=1
+default_work_orders=1
 default_single_port=1
 skip_verify=0
 run_migrations=1
@@ -30,7 +31,7 @@ warn(){ echo -e "${YELLOW}!${NC} $1"; }
 err(){ echo -e "${RED}✗${NC} $1"; }
 container_exists(){ docker ps -a --format '{{.Names}}' | grep -qx "$1"; }
 
-HOST_OVERRIDE=""; observability="$default_observability"; enable_agents=$default_agents; enable_single_port=$default_single_port
+HOST_OVERRIDE=""; observability="$default_observability"; enable_agents=$default_agents; enable_work_orders=$default_work_orders; enable_single_port=$default_single_port
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -38,6 +39,8 @@ while [[ $# -gt 0 ]]; do
     --observability) observability="${2:-}"; shift 2;;
     --agents) enable_agents=1; shift;;
     --no-agents) enable_agents=0; shift;;
+    --work-orders) enable_work_orders=1; shift;;
+    --no-work-orders) enable_work_orders=0; shift;;
     --single-port) enable_single_port=1; shift;;
     --no-single-port) enable_single_port=0; shift;;
     --no-verify) skip_verify=1; shift;;
@@ -45,8 +48,10 @@ while [[ $# -gt 0 ]]; do
     --fresh) fresh_install=1; shift;;
     -h|--help)
       cat <<EOF
-Usage: $(basename "$0") [--host <ip>] [--observability compose|script|none] [--no-agents] [--no-single-port] [--no-verify] [--no-migrations] [--fresh]
+Usage: $(basename "$0") [--host <ip>] [--observability compose|script|none] [--no-agents] [--no-work-orders] [--no-single-port] [--no-verify] [--no-migrations] [--fresh]
 Options:
+  --work-orders   Enable agent work orders service (default: enabled)
+  --no-work-orders Disable agent work orders service
   --fresh         Perform fresh database install (wipe and reinstall schema)
 EOF
       exit 0;;
@@ -108,6 +113,7 @@ upsert_if_empty ARCHON_SERVER_PORT "8181"
 upsert_if_empty ARCHON_MCP_PORT "8051"
 upsert_if_empty ARCHON_AGENTS_PORT "8052"
 upsert_if_empty ARCHON_UI_PORT "3737"
+upsert_if_empty AGENT_WORK_ORDERS_PORT "8053"
 upsert_if_empty VITE_SHOW_DEVTOOLS "false"
 upsert_if_empty OTEL_EXPORTER_OTLP_ENDPOINT "http://localhost:4318"
 upsert_if_empty OTEL_EXPORTER_OTLP_PROTOCOL "http/protobuf"
@@ -290,6 +296,10 @@ if [[ $enable_agents -eq 1 ]]; then
   ( cd "$ARCHON_SRC_DIR" && unset SUPABASE_URL && docker compose --profile agents up -d ) || warn "Agents profile failed to start"
 fi
 
+if [[ $enable_work_orders -eq 1 ]]; then
+  ( cd "$ARCHON_SRC_DIR" && unset SUPABASE_URL && docker compose --profile work-orders up -d ) || warn "Work orders profile failed to start"
+fi
+
 # Start observability locally (separate compose)
 if [[ "$observability" == "compose" ]]; then
   if [[ $SKIP_COMPOSE_OBS -eq 0 ]]; then
@@ -333,6 +343,10 @@ if [[ $skip_verify -eq 0 ]]; then
   check_service "MCP" "http://$CHECK_HOST:$MCP_PORT/health" 20 3 "200 404"
   if [[ $enable_agents -eq 1 ]]; then
     check_service "Agents" "http://$CHECK_HOST:$AGENTS_PORT/health" 20 3
+  fi
+  if [[ $enable_work_orders -eq 1 ]]; then
+    WORK_ORDERS_PORT=$(grep -E '^AGENT_WORK_ORDERS_PORT=' "$ENV_FILE" | sed 's/^AGENT_WORK_ORDERS_PORT=//;s/\r$//'); WORK_ORDERS_PORT=${WORK_ORDERS_PORT:-8053}
+    check_service "Work Orders" "http://$CHECK_HOST:$WORK_ORDERS_PORT/health" 20 3
   fi
   if [[ "$observability" != "none" ]]; then
     check_service "OpenObserve UI" "http://$CHECK_HOST:5080/" 24 5 "200 201 204 301 302 303 307 308"
@@ -381,6 +395,15 @@ if [[ $enable_agents -eq 1 ]]; then
   echo "- Agents: http://$HOST_VAL:$AGENTS_PORT"
   if [[ -n "$ALT_HOST" && "$ALT_HOST" != "$HOST_VAL" ]]; then
     echo "  (WSL) http://$ALT_HOST:$AGENTS_PORT"
+  fi
+fi
+
+if [[ $enable_work_orders -eq 1 ]]; then
+  WORK_ORDERS_PORT=${WORK_ORDERS_PORT:-$(grep -E '^AGENT_WORK_ORDERS_PORT=' "$ENV_FILE" | sed 's/^AGENT_WORK_ORDERS_PORT=//;s/\r$//')}
+  WORK_ORDERS_PORT=${WORK_ORDERS_PORT:-8053}
+  echo "- Work Orders: http://$HOST_VAL:$WORK_ORDERS_PORT"
+  if [[ -n "$ALT_HOST" && "$ALT_HOST" != "$HOST_VAL" ]]; then
+    echo "  (WSL) http://$ALT_HOST:$WORK_ORDERS_PORT"
   fi
 fi
 
