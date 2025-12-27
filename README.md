@@ -1,128 +1,197 @@
-# AeyeOps Archon Minimal Stack
+# AeyeOps Archon
 
-This repository contains a minimal, self‑contained launcher for running Archon either from published container images or directly from source. It avoids pulling in the whole upstream codebase while remaining easy to keep up‑to‑date.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Supabase](https://img.shields.io/badge/Supabase-Local%20%7C%20Cloud-3ECF8E)](https://supabase.com)
 
-The stack is idempotent: re-running the launcher reconciles containers and preserves your existing configuration.
+A production-ready wrapper for [Archon](https://github.com/coleam00/archon) that provides automated bootstrap, migration management, and operational tooling for self-hosted deployments.
 
-## Prerequisites
+## Features
 
+- **One-Command Bootstrap**: Install prerequisites, clone upstream, and launch the full stack
+- **Automatic Migrations**: Pull and apply database migrations from upstream on every update
+- **Supabase Recovery**: Automatic detection and recovery from storage migration conflicts
+- **E2E Validation**: 19 automated health checks across database, storage, API, and observability
+- **Version Pinning**: Prevent CLI version drift with locked Supabase CLI versions
+- **Observability**: Integrated OpenObserve for traces, logs, and metrics
+
+## Quick Start
+
+### Prerequisites
+
+- Linux (Ubuntu 22.04+ recommended) or WSL2
 - Docker and Docker Compose
-- A Supabase project (Cloud or local CLI)
-  - Required values: `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` (service_role key)
+- sudo access for initial setup
 
-## Quick Start (Images)
-
-1. Copy and edit environment
+### Bootstrap (Recommended)
 
 ```bash
-cp .env.sample .env
-# Edit .env:
-# - ARCHON_*_IMAGE to point at your images
-# - SUPABASE_URL, SUPABASE_URL_CONTAINER, SUPABASE_SERVICE_KEY
+# Clone this repository
+git clone https://github.com/AeyeOps/aeo-archon.git
+cd aeo-archon
+
+# Run bootstrap (installs Docker, Node.js, clones Archon, starts everything)
+sudo ./bootstrap-archon.sh
 ```
 
-2. Launch
+The bootstrap script:
+1. Installs system prerequisites (Docker, NVM, Node.js)
+2. Clones/updates the Archon fork from upstream
+3. Starts local Supabase (PostgreSQL, Auth, Storage, Kong)
+4. Applies database migrations automatically
+5. Launches the Archon stack (Server, MCP, UI, Agents)
+6. Starts OpenObserve for observability
+
+### Manual Start (After Bootstrap)
 
 ```bash
-bash ./archon-up.sh
+# Start all services
+./archon-up.sh
+
+# Stop all services
+./stop-archon.sh
+
+# Restart specific services
+./restart-archon-services.sh
 ```
 
-By default, the launcher:
-- Enables single‑port mode (`PROD=true`), so the API is served under `/api` on port `3737`.
-- Starts OpenObserve via the Compose profile (UI on `5080`, OTLP at `openobserve:4318`).
-- Starts Agents.
+## Architecture
 
-### Example image sets
-
-Option A — locally built images (if you have recently built Archon from source on this machine, the images below likely exist):
-
-```bash
-ARCHON_SERVER_IMAGE=archon-archon-server:latest
-ARCHON_MCP_IMAGE=archon-archon-mcp:latest
-ARCHON_FRONTEND_IMAGE=archon-archon-frontend:latest
-ARCHON_AGENTS_IMAGE=archon-archon-agents:latest
 ```
+aeo-archon/                     # This wrapper repository
+├── bootstrap-archon.sh         # One-command setup script
+├── archon-up.sh                # Service launcher with health checks
+├── stop-archon.sh              # Clean shutdown with container cleanup
+├── lib/
+│   ├── supabase-recovery.sh    # Automatic storage migration recovery
+│   └── e2e-tests.sh            # Comprehensive validation suite
+├── migration/
+│   └── run_migrations.py       # Idempotent migration runner
+└── supabase/                   # Local Supabase project
 
-Option B — published images (replace with your registry paths and tags):
-
-```bash
-ARCHON_SERVER_IMAGE=ghcr.io/your-org/archon-server:latest
-ARCHON_MCP_IMAGE=ghcr.io/your-org/archon-mcp:latest
-ARCHON_FRONTEND_IMAGE=ghcr.io/your-org/archon-frontend:latest
-ARCHON_AGENTS_IMAGE=ghcr.io/your-org/archon-agents:latest
+/opt/aeo/archon-src/            # Upstream Archon (auto-managed)
+├── python/                     # FastAPI backend
+├── archon-ui-main/             # React frontend
+└── migration/                  # Database migrations
 ```
-
-## Quick Start (Source)
-
-Use this if you prefer to run from the upstream repository without manually cloning or wiring environment variables.
-
-```bash
-bash ./bootstrap-from-source.sh
-```
-
-What it does:
-- Clones `https://github.com/coleam00/archon.git` into `./archon-src` (or pulls latest if it already exists).
-- Creates `archon-src/.env` from examples if missing.
-- If a local Supabase CLI project is detected (e.g., `supabase/.env` with `SERVICE_ROLE_KEY`), it auto‑populates:
-  - `SUPABASE_URL=http://127.0.0.1:54321`
-  - `SUPABASE_URL_CONTAINER=http://host.docker.internal:54321`
-  - `SUPABASE_SERVICE_KEY=<SERVICE_ROLE_KEY>`
-- Starts Archon from source by invoking the repo’s launcher.
-
-To initialize Supabase CLI locally (optional):
-
-```bash
-cd archon-src
-npx supabase@latest init
-npx supabase start
-```
-
-## Configuration
-
-- `HOST` — IP or hostname to expose externally on your LAN. The launcher ensures it is added to `VITE_ALLOWED_HOSTS` without duplicates.
-- `PROD` — when `true`, the UI serves the API at `/api` on port `3737`.
-- `VITE_ALLOWED_HOSTS` — comma‑separated allowlist for Vite dev server host checks. The launcher appends `HOST` if missing.
-- Observability — by default, OpenObserve runs via Compose and the containers export telemetry to `http://openobserve:4318` on the internal network.
-
-Idempotency and safety:
-- The launcher never overwrites existing keys in `.env`. It only creates missing keys and merges allowlists.
-- If an `openobserve` container already exists, it is reused and attached to the app network to avoid name conflicts.
 
 ## Endpoints
 
-- UI: `http://HOST:3737`
-- API: `http://HOST:3737/api` (when `PROD=true`) or `http://HOST:8181`
-- MCP: `http://HOST:8051`
-- Agents: `http://HOST:8052`
-- Observability (OpenObserve): `http://HOST:5080`
+| Service | Port | URL |
+|---------|------|-----|
+| UI | 3737 | http://localhost:3737 |
+| API | 8181 | http://localhost:8181 (or /api on 3737 with PROD=true) |
+| MCP | 8051 | http://localhost:8051 |
+| Agents | 8052 | http://localhost:8052 |
+| Work Orders | 8053 | http://localhost:8053 |
+| Supabase | 54321 | http://localhost:54321 |
+| Studio | 54323 | http://localhost:54323 |
+| OpenObserve | 5080 | http://localhost:5080 |
 
-## Archon Visuals (Replicate)
+## Configuration
 
-Two lightweight, repo‑aligned visuals generated via Replicate:
+Key environment variables in `.env`:
 
-- Stack diagram (isometric, dark theme)
-  - ![Archon Stack](images/archon-stack.webp)
-- Emblem (geometric eye + archway motif)
-  - ![Archon Emblem](images/archon-emblem.webp)
+```bash
+# Supabase connection (auto-configured by bootstrap)
+SUPABASE_URL=http://127.0.0.1:54321
+SUPABASE_SERVICE_KEY=<service_role_key>  # NOT the anon key!
 
-These are illustrative only; they do not change runtime behavior.
+# Service ports
+ARCHON_SERVER_PORT=8181
+ARCHON_MCP_PORT=8051
+ARCHON_AGENTS_PORT=8052
+ARCHON_UI_PORT=3737
 
-## One‑Time Database Setup
+# Features
+PROD=true                       # Single-port mode (API at /api on UI port)
+AGENTS_ENABLED=true             # Enable agents service
+LOGFIRE_ENABLED=true            # Enable OpenObserve telemetry
+```
 
-Run the contents of `migration/complete_setup.sql` in your Supabase SQL editor to initialize required tables and settings.
+## Operations
+
+### Updating from Upstream
+
+```bash
+# Re-run bootstrap to pull latest and apply migrations
+sudo ./bootstrap-archon.sh
+```
+
+### Fresh Install (Wipe Database)
+
+```bash
+# Warning: This deletes all data!
+sudo ./bootstrap-archon.sh --fresh
+```
+
+### Upgrading Supabase CLI Version
+
+```bash
+# Clean old images when changing CLI versions
+sudo ./bootstrap-archon.sh --clean-images
+```
+
+### Running Tests
+
+```bash
+# Run E2E validation suite
+./test-archon.sh
+```
+
+### Diagnostics
+
+```bash
+# Full system health check
+./diagnostics/check-archon.sh
+```
 
 ## Troubleshooting
 
-- API not reachable via UI port:
-  - Ensure `PROD=true` and restart the UI + server containers.
-- CORS or host errors:
-  - Set `HOST` to your LAN IP or hostname and ensure it’s present in `VITE_ALLOWED_HOSTS`.
-- No traces in OpenObserve:
-  - Confirm the containers export to `OTEL_EXPORTER_OTLP_ENDPOINT_CONTAINER=http://openobserve:4318` and that the `openobserve` container is running.
-- Supabase permission errors:
-  - Verify you are using the `service_role` key and that `SUPABASE_URL` is correct (Cloud or `127.0.0.1:54321` for local CLI).
+### Storage Migration Errors
 
-## Notes
+If you see `duplicate key value violates unique constraint "migrations_name_key"`:
 
-- This minimal stack is designed to be independent of the upstream repository while still allowing a source‑based workflow when desired.
-- The launchers are idempotent and safe to re‑run.
+```bash
+# The system auto-recovers, but if manual intervention needed:
+./stop-archon.sh --force
+sudo ./bootstrap-archon.sh --clean-images
+```
+
+### Permission Denied Errors
+
+Ensure you're using the `service_role` key, not the `anon` key:
+- The service_role key contains `"role":"service_role"` in its JWT payload
+- The anon key will cause all database writes to fail
+
+### Container Conflicts
+
+```bash
+# Force cleanup of stale containers
+./stop-archon.sh --force
+```
+
+## Contributing
+
+1. Fork this repository
+2. Create a feature branch
+3. Make your changes
+4. Run `./test-archon.sh` to validate
+5. Submit a pull request
+
+See [AGENTS.md](AGENTS.md) for coding standards and guidelines.
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+## Acknowledgments
+
+- [Archon](https://github.com/coleam00/archon) by Cole Medin
+- [Supabase](https://supabase.com) for the backend infrastructure
+- [OpenObserve](https://openobserve.ai) for observability
+
+---
+
+<p align="center">
+  <img src="images/archon-emblem.webp" alt="Archon Emblem" width="120">
+</p>

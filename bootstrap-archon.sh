@@ -20,6 +20,15 @@ err(){ echo -e "${RED}✗${NC} $1"; }
 
 # Configuration
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source shared recovery functions if available
+if [[ -f "$ROOT_DIR/lib/supabase-recovery.sh" ]]; then
+  source "$ROOT_DIR/lib/supabase-recovery.sh"
+fi
+
+# Version pinning (inherit from recovery lib or set default)
+SUPABASE_VERSION="${SUPABASE_VERSION:-2.70.5}"
+
 ARCHON_REPO_URL="${ARCHON_REPO_URL:-https://github.com/coleam00/archon.git}"
 ARCHON_BRANCH="${ARCHON_BRANCH:-aeyeops/custom-main}"
 ARCHON_SRC_DIR_DEFAULT="${ARCHON_SRC_DIR_OVERRIDE:-/opt/aeo/archon-src}"
@@ -27,6 +36,7 @@ ARCHON_SRC_DIR="$ARCHON_SRC_DIR_DEFAULT"
 NODE_VERSION_REQUIRED="${NODE_VERSION_REQUIRED:-lts/*}"
 DO_START=1
 FRESH_INSTALL=0
+CLEAN_IMAGES=0
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -36,9 +46,10 @@ while [[ $# -gt 0 ]]; do
     --dir) ARCHON_SRC_DIR="${2:-}"; shift 2;;
     --no-start) DO_START=0; shift;;
     --fresh) FRESH_INSTALL=1; shift;;
+    --clean-images) CLEAN_IMAGES=1; shift;;
     -h|--help)
       cat <<EOF
-Usage: $(basename "$0") [--repo <url>] [--branch <name>] [--dir <path>] [--no-start] [--fresh]
+Usage: $(basename "$0") [--repo <url>] [--branch <name>] [--dir <path>] [--no-start] [--fresh] [--clean-images]
 
 Bootstrap Archon by installing system prerequisites, cloning/updating repository, and launching.
 
@@ -48,6 +59,7 @@ Options:
   --dir <path>    Installation directory (default: /opt/aeo/archon-src)
   --no-start      Skip launching after bootstrap
   --fresh         Perform fresh database install (wipe and reinstall schema)
+  --clean-images  Remove old Supabase Docker images (useful when upgrading CLI version)
   -h, --help      Show this help message
 
 Environment Variables:
@@ -55,6 +67,7 @@ Environment Variables:
   ARCHON_BRANCH             Override default branch
   ARCHON_SRC_DIR_OVERRIDE   Override default installation directory
   NODE_VERSION_REQUIRED     Override Node.js version (default: lts/*)
+  SUPABASE_VERSION          Override Supabase CLI version (default: 2.70.5)
 EOF
       exit 0;;
     *) err "Unknown option: $1"; exit 1;;
@@ -171,8 +184,8 @@ fi
 su - "$CURRENT_USER" -c "export NVM_DIR='$NVM_DIR'; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm install $NODE_VERSION_REQUIRED > /dev/null"
 ok "Node.js $(su - "$CURRENT_USER" -c "export NVM_DIR='$NVM_DIR'; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm current") ensured"
 
-su - "$CURRENT_USER" -c "export NVM_DIR='$NVM_DIR'; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npx --yes supabase@latest --help >/dev/null"
-ok "npx supabase@latest available"
+su - "$CURRENT_USER" -c "export NVM_DIR='$NVM_DIR'; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npx --yes supabase@$SUPABASE_VERSION --help >/dev/null"
+ok "npx supabase@$SUPABASE_VERSION available"
 
 # ============================================================================
 # PHASE 1.5: Stop Running Services (if any)
@@ -184,9 +197,25 @@ echo "==> Phase 1.5: Stopping running services"
 if [[ -x "$ROOT_DIR/stop-archon.sh" ]]; then
   # Run as CURRENT_USER so NVM/npx is available for Supabase CLI
   # Export ARCHON_SRC_DIR so stop script uses correct path
-  su - "$CURRENT_USER" -c "export ARCHON_SRC_DIR_OVERRIDE='$ARCHON_SRC_DIR'; cd '$ROOT_DIR' && bash ./stop-archon.sh"
+  # Use --force to ensure all stale containers are cleaned up
+  su - "$CURRENT_USER" -c "export ARCHON_SRC_DIR_OVERRIDE='$ARCHON_SRC_DIR'; export SUPABASE_VERSION='$SUPABASE_VERSION'; cd '$ROOT_DIR' && bash ./stop-archon.sh --force"
 else
   warn "stop-archon.sh not found; skipping service shutdown"
+fi
+
+# Clean old Supabase images if requested (prevents version drift issues)
+if [[ $CLEAN_IMAGES -eq 1 ]]; then
+  echo "Cleaning old Supabase Docker images..."
+  if type -t cleanup_old_supabase_images >/dev/null 2>&1; then
+    cleanup_old_supabase_images
+  else
+    # Inline cleanup if function not available
+    docker image prune -f 2>/dev/null || true
+    docker images --format '{{.Repository}}:{{.Tag}}' | grep -E 'supabase/' | while read img; do
+      docker rmi "$img" 2>/dev/null || true
+    done
+  fi
+  ok "Old Supabase images cleaned"
 fi
 
 # ============================================================================

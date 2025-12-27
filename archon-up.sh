@@ -3,6 +3,11 @@ set -Eeuo pipefail
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$ROOT_DIR/.env"
+
+# Source shared recovery and utility functions
+if [[ -f "$ROOT_DIR/lib/supabase-recovery.sh" ]]; then
+  source "$ROOT_DIR/lib/supabase-recovery.sh"
+fi
 COMPOSE_FILES="-f docker-compose.images.yml"
 SUPABASE_DIR="$ROOT_DIR/supabase"
 ARCHON_SRC_DIR_DEFAULT="${ARCHON_SRC_DIR_OVERRIDE:-/opt/aeo/archon-src}"
@@ -138,13 +143,58 @@ ensure_supabase_env(){
   command -v npx >/dev/null 2>&1 || { err "npx not found. Install Node.js (>=18) to use supabase CLI"; exit 1; }
   mkdir -p "$SUPABASE_DIR"
   pushd "$SUPABASE_DIR" >/dev/null
+
+  # Check for version drift (warn if CLI version changed)
+  if type -t check_version_drift >/dev/null 2>&1; then
+    check_version_drift || true  # Continue even if drift detected
+  fi
+
+  # Pre-start cleanup to prevent container name conflicts
+  if type -t cleanup_stale_containers >/dev/null 2>&1; then
+    cleanup_stale_containers
+  fi
+
   # Supabase CLI keeps config under ./supabase/config.toml
   if [[ ! -f "supabase/config.toml" ]]; then
-    npx -y supabase@latest init || { err "Failed to initialize Supabase CLI project"; exit 1; }
+    npx -y supabase@${SUPABASE_VERSION:-2.70.5} init || { err "Failed to initialize Supabase CLI project"; exit 1; }
   fi
-  npx -y supabase@latest start || { err "Failed to start local Supabase via CLI"; exit 1; }
+
+  # Attempt to start Supabase, with automatic recovery for storage migration issues
+  local start_attempts=3
+  for attempt in $(seq 1 $start_attempts); do
+    if npx -y supabase@${SUPABASE_VERSION:-2.70.5} start; then
+      break
+    else
+      if [[ $attempt -lt $start_attempts ]]; then
+        warn "Supabase start failed (attempt $attempt/$start_attempts). Attempting recovery..."
+        # Check if storage container failed
+        if docker logs supabase_storage_supabase 2>&1 | grep -q "duplicate key value violates unique constraint"; then
+          warn "Storage migration conflict detected - resetting migrations and cleaning old images..."
+          if type -t recover_storage_migrations >/dev/null 2>&1; then
+            recover_storage_migrations
+          else
+            # Inline recovery if function not available
+            docker exec supabase_db_supabase bash -c \
+              'PGPASSWORD=postgres psql -U supabase_admin -d postgres -c "TRUNCATE storage.migrations RESTART IDENTITY CASCADE;"' 2>/dev/null || true
+          fi
+          # Clean old storage-api images to ensure CLI pulls correct version
+          if type -t cleanup_old_supabase_images >/dev/null 2>&1; then
+            cleanup_old_supabase_images
+          fi
+        fi
+        # Clean up and retry
+        npx -y supabase@${SUPABASE_VERSION:-2.70.5} stop 2>/dev/null || true
+        if type -t cleanup_stale_containers >/dev/null 2>&1; then
+          cleanup_stale_containers
+        fi
+      else
+        err "Failed to start local Supabase via CLI after $start_attempts attempts"
+        exit 1
+      fi
+    fi
+  done
   # Query status in env format and parse required values
-  STATUS_ENV=$(npx -y supabase@latest status -o env) || { err "Failed to get Supabase status"; exit 1; }
+  STATUS_ENV=$(npx -y supabase@${SUPABASE_VERSION:-2.70.5} status -o env) || { err "Failed to get Supabase status"; exit 1; }
   SERVICE_ROLE_KEY=$(echo "$STATUS_ENV" | awk -F'=' '/^SERVICE_ROLE_KEY/{gsub(/"/,"",$2); print $2}')
   API_URL=$(echo "$STATUS_ENV" | awk -F'=' '/^API_URL/{gsub(/"/,"",$2); print $2}')
   popd >/dev/null
@@ -160,6 +210,12 @@ ensure_supabase_env(){
     upsert_env SUPABASE_URL_CONTAINER "http://host.docker.internal:54321"
   fi
   upsert_env SUPABASE_SERVICE_KEY "$SERVICE_ROLE_KEY"
+
+  # Record successful version for future drift detection
+  if type -t record_supabase_version >/dev/null 2>&1; then
+    record_supabase_version
+  fi
+
   ok "Supabase configured via supabase CLI"
 }
 
@@ -237,6 +293,18 @@ upsert_src_env ARCHON_SERVER_PORT "$(grep -E '^ARCHON_SERVER_PORT=' "$ENV_FILE" 
 upsert_src_env ARCHON_MCP_PORT "$(grep -E '^ARCHON_MCP_PORT=' "$ENV_FILE" | sed 's/^ARCHON_MCP_PORT=//')"
 upsert_src_env ARCHON_AGENTS_PORT "$(grep -E '^ARCHON_AGENTS_PORT=' "$ENV_FILE" | sed 's/^ARCHON_AGENTS_PORT=//')"
 upsert_src_env ARCHON_UI_PORT "$(grep -E '^ARCHON_UI_PORT=' "$ENV_FILE" | sed 's/^ARCHON_UI_PORT=//')"
+
+# Run preflight checks if available
+if type -t preflight_checks >/dev/null 2>&1; then
+  preflight_checks || warn "Some preflight checks failed - continuing anyway"
+fi
+
+# Auto-backup before fresh install
+if [[ $fresh_install -eq 1 ]]; then
+  if type -t auto_backup >/dev/null 2>&1; then
+    auto_backup "pre-fresh"
+  fi
+fi
 
 # Run database migrations (idempotent, optional) before starting services
 if [[ $run_migrations -eq 1 ]]; then
@@ -413,4 +481,18 @@ if [[ "$observability" != "none" ]]; then
     echo "  (WSL) http://$ALT_HOST:5080"
   fi
   echo "  (OpenObserve login: admin@archon.local / archon-admin)"
+fi
+
+# Record versions for debugging
+if type -t record_versions >/dev/null 2>&1; then
+  record_versions
+fi
+
+# Run E2E validation tests
+if [[ $skip_verify -eq 0 ]]; then
+  if [[ -f "$ROOT_DIR/lib/e2e-tests.sh" ]]; then
+    source "$ROOT_DIR/lib/e2e-tests.sh"
+    echo ""
+    run_e2e_tests || warn "Some E2E tests failed - review output above"
+  fi
 fi
