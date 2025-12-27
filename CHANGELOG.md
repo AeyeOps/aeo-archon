@@ -7,21 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2025-12-27
+
 ### Added
 - Supabase recovery library (`lib/supabase-recovery.sh`) with automatic storage migration recovery
 - E2E validation test suite (`lib/e2e-tests.sh`) with 19 automated tests across 5 categories
+- Standalone test runner (`test-archon.sh`)
 - Version pinning for Supabase CLI (2.70.5) to prevent migration drift
 - Version drift detection with `.supabase-version-lock` tracking
 - `--clean-images` flag for bootstrap to handle CLI version upgrades
 - Pre-start container cleanup to prevent orphaned container conflicts
 - Automatic retry loop (3 attempts) for Supabase storage migration failures
+- CHANGELOG.md with full version history
+- Professional README.md for public repository
+- Comprehensive AGENTS.md as AI assistant guide
 
 ### Fixed
 - Storage migration unique constraint violations during bootstrap
 - Stale container conflicts preventing clean restarts
 - OpenObserve integration with LOGFIRE_ENABLED setting
 
-## [0.6.0] - 2025-12-27
+### Changed
+- Consolidated all recovery functions into shared library
+- Improved documentation for public release
+
+## [0.6.0] - 2025-12-20
 
 ### Added
 - Work-orders profile support in archon-up.sh
@@ -104,7 +114,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/AeyeOps/aeo-archon/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/AeyeOps/aeo-archon/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/AeyeOps/aeo-archon/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/AeyeOps/aeo-archon/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/AeyeOps/aeo-archon/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/AeyeOps/aeo-archon/compare/v0.3.0...v0.4.0
