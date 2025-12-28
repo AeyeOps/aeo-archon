@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2025-12-27
+
+### Added
+- OpenObserve OTEL integration with automatic docker-compose.override.yml generation
+- Dynamic authentication header generation for OpenObserve telemetry ingestion
+- OTEL environment variable configuration for all Archon services (server, mcp, agents)
+- OpenObserve service configuration in docker-compose override
+- Support for local observability without Logfire cloud (OTEL export mode)
+
+### Changed
+- archon-up.sh now generates docker-compose.override.yml dynamically
+- OTEL endpoints corrected to use OpenObserve port 5080 (not 4317/4318)
+- Environment variables added: OPENOBSERVE_USER, OPENOBSERVE_PASSWORD
+
+### Fixed
+- OpenObserve telemetry collection (traces now properly ingested)
+- Logfire OTEL export configuration (works without LOGFIRE_TOKEN)
+- FastAPI instrumentation timing (configure before instrument)
+
 ## [0.7.0] - 2025-12-27
 
 ### Added
@@ -114,7 +133,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/AeyeOps/aeo-archon/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/AeyeOps/aeo-archon/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/AeyeOps/aeo-archon/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/AeyeOps/aeo-archon/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/AeyeOps/aeo-archon/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/AeyeOps/aeo-archon/compare/v0.4.0...v0.5.0
