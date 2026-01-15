@@ -1,0 +1,83 @@
+# OpenObserve + OTEL configuration for Archon observability
+# Usage: docker compose -f docker-compose.yml -f /opt/aeo/aeo-archon/docker-compose.openobserve.yml up
+#
+# This file extends the main archon docker-compose.yml with:
+# - OpenObserve service for logs, traces, and metrics
+# - OTEL environment variables for all Archon services
+#
+# Web UI: http://localhost:5080
+# Credentials: admin@archon.local / archon123
+
+services:
+  openobserve:
+    image: public.ecr.aws/zinclabs/openobserve:latest
+    container_name: openobserve
+    ports:
+      - "${OPENOBSERVE_PORT:-5080}:5080"
+    environment:
+      - ZO_ROOT_USER_EMAIL=${OPENOBSERVE_USER:-admin@archon.local}
+      - ZO_ROOT_USER_PASSWORD=${OPENOBSERVE_PASSWORD:-archon123}
+      - ZO_DATA_DIR=/data
+    volumes:
+      - openobserve-data:/data
+    networks:
+      - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  archon-server:
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://openobserve:5080/api/default
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic YWRtaW5AYXJjaG9uLmxvY2FsOmFyY2hvbjEyMw==
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_LOGS_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=otlp
+      - OTEL_TRACES_SAMPLER=always_on
+      - OTEL_SERVICE_NAME=archon-server
+      - LOGFIRE_SEND_TO_CLOUD=false
+      - LOGFIRE_ENABLED=true
+    depends_on:
+      openobserve:
+        condition: service_healthy
+
+  archon-mcp:
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://openobserve:5080/api/default
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic YWRtaW5AYXJjaG9uLmxvY2FsOmFyY2hvbjEyMw==
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_LOGS_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=otlp
+      - OTEL_TRACES_SAMPLER=always_on
+      - OTEL_SERVICE_NAME=archon-mcp
+      - LOGFIRE_SEND_TO_CLOUD=false
+      - LOGFIRE_ENABLED=true
+    depends_on:
+      openobserve:
+        condition: service_healthy
+
+  archon-agents:
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://openobserve:5080/api/default
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic YWRtaW5AYXJjaG9uLmxvY2FsOmFyY2hvbjEyMw==
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_LOGS_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=otlp
+      - OTEL_TRACES_SAMPLER=always_on
+      - OTEL_SERVICE_NAME=archon-agents
+      - LOGFIRE_SEND_TO_CLOUD=false
+      - LOGFIRE_ENABLED=true
+    depends_on:
+      openobserve:
+        condition: service_healthy
+
+volumes:
+  openobserve-data:
+    name: archon-openobserve-data
