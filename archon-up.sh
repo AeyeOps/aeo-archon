@@ -10,7 +10,7 @@ if [[ -f "$ROOT_DIR/lib/supabase-recovery.sh" ]]; then
 fi
 COMPOSE_FILES="-f docker-compose.images.yml"
 SUPABASE_DIR="$ROOT_DIR/supabase"
-ARCHON_SRC_DIR_DEFAULT="${ARCHON_SRC_DIR_OVERRIDE:-/opt/aeo/archon-src}"
+ARCHON_SRC_DIR_DEFAULT="${ARCHON_SRC_DIR_OVERRIDE:-$ROOT_DIR/archon-src}"
 ARCHON_SRC_BRANCH_DEFAULT="${ARCHON_SRC_BRANCH_OVERRIDE:-aeyeops/custom-main}"
 ARCHON_SRC_DIR="$ARCHON_SRC_DIR_DEFAULT"
 ARCHON_SRC_BRANCH="$ARCHON_SRC_BRANCH_DEFAULT"
@@ -207,7 +207,16 @@ ensure_supabase_env(){
   upsert_env SUPABASE_URL "$API_URL"
   SUPABASE_KONG=$(docker ps --format '{{.Names}}' | grep -m1 'supabase_kong' || true)
   if [[ -n "$SUPABASE_KONG" ]]; then
-    upsert_env SUPABASE_URL_CONTAINER "http://$SUPABASE_KONG:8000"
+    # Resolve container name to IP for upstream URL validation compatibility
+    # (upstream rejects container hostnames but accepts RFC 1918 private IPs)
+    KONG_IP=$(docker inspect "$SUPABASE_KONG" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null | head -1)
+    if [[ -n "$KONG_IP" ]]; then
+      upsert_env SUPABASE_URL_CONTAINER "http://${KONG_IP}:8000"
+    else
+      # Fallback to container name - will likely fail upstream URL validation
+      warn "Could not resolve Kong container IP. Server may fail to start."
+      upsert_env SUPABASE_URL_CONTAINER "http://$SUPABASE_KONG:8000"
+    fi
     wait_for_supabase_ready "$SUPABASE_KONG"
   else
     upsert_env SUPABASE_URL_CONTAINER "http://host.docker.internal:54321"
@@ -357,6 +366,15 @@ if [[ $run_migrations -eq 1 ]]; then
   if [[ -n "$SUPABASE_KONG" ]]; then
     wait_for_supabase_table "$SUPABASE_KONG" "archon_settings" "$SUPABASE_SERVICE_KEY_VAL"
   fi
+
+  # Cleanup stale encrypted credentials that can't be decrypted with current key
+  # (Happens when SUPABASE_SERVICE_KEY changes, e.g., fresh Supabase init)
+  docker run --rm --network supabase_network_supabase \
+    -e DB_HOST="$DB_HOST" -e DB_PORT="$DB_PORT" -e DB_USER="$DB_USER" -e DB_PASSWORD="$DB_PASSWORD" -e DB_NAME="$DB_NAME" \
+    -e SUPABASE_SERVICE_KEY="$SUPABASE_SERVICE_KEY_VAL" \
+    -e PIP_ROOT_USER_ACTION=ignore -e PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    -v "$ROOT_DIR":/work -w /work \
+    python:3.12-slim bash -lc "pip install -q psycopg2-binary cryptography && python migration/cleanup_stale_credentials.py"
 fi
 
 # OpenObserve compose file location (lives in aeo-archon, not archon-src)

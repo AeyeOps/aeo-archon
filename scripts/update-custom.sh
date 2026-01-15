@@ -3,7 +3,8 @@
 # Run from aeo-archon/scripts/ - operates on archon-src repo
 set -euo pipefail
 
-ARCHON_SRC_DIR="${ARCHON_SRC_DIR:-/opt/aeo/archon-src}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ARCHON_SRC_DIR="${ARCHON_SRC_DIR:-$SCRIPT_DIR/../archon-src}"
 TARGET_BRANCH="${TARGET_BRANCH:-aeyeops/custom-main}"
 
 if [[ ! -d "$ARCHON_SRC_DIR/.git" ]]; then

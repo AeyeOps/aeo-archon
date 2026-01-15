@@ -4,7 +4,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUPABASE_DIR="$ROOT_DIR/supabase"
-ARCHON_SRC_DIR="${ARCHON_SRC_DIR_OVERRIDE:-/opt/aeo/archon-src}"
+ARCHON_SRC_DIR="${ARCHON_SRC_DIR_OVERRIDE:-$ROOT_DIR/archon-src}"
 
 # Source shared recovery functions if available
 if [[ -f "$ROOT_DIR/lib/supabase-recovery.sh" ]]; then

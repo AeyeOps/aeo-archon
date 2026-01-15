@@ -303,6 +303,15 @@ echo "==> Phase 2: Setting up Archon repository"
 # Clone or update repository
 if [[ -d "$ARCHON_SRC_DIR/.git" ]]; then
   echo "Repository exists at $ARCHON_SRC_DIR; ensuring branch $ARCHON_BRANCH..."
+
+  # Ensure origin points to the correct repository (fork, not upstream)
+  CURRENT_ORIGIN=$(git -C "$ARCHON_SRC_DIR" remote get-url origin 2>/dev/null || true)
+  if [[ -n "$CURRENT_ORIGIN" && "$CURRENT_ORIGIN" != "$ARCHON_REPO_URL" ]]; then
+    warn "Origin points to $CURRENT_ORIGIN (expected $ARCHON_REPO_URL)"
+    git -C "$ARCHON_SRC_DIR" remote set-url origin "$ARCHON_REPO_URL"
+    ok "Fixed origin remote URL"
+  fi
+
   CURRENT_BRANCH=$(git -C "$ARCHON_SRC_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
   if [[ "$CURRENT_BRANCH" != "$ARCHON_BRANCH" ]]; then
     git -C "$ARCHON_SRC_DIR" fetch --all --prune || warn "Fetch failed; continuing with existing refs"
@@ -329,6 +338,20 @@ else
   echo "Cloning $ARCHON_REPO_URL into $ARCHON_SRC_DIR..."
   git clone --depth 1 --branch "$ARCHON_BRANCH" "$ARCHON_REPO_URL" "$ARCHON_SRC_DIR"
   ok "Repository cloned"
+fi
+
+# Ensure upstream remote exists for sync-main.sh workflow
+# (origin = fork, upstream = coleam00/archon for syncing)
+UPSTREAM_URL="https://github.com/coleam00/archon.git"
+if [[ -d "$ARCHON_SRC_DIR/.git" ]]; then
+  CURRENT_UPSTREAM=$(git -C "$ARCHON_SRC_DIR" remote get-url upstream 2>/dev/null || true)
+  if [[ -z "$CURRENT_UPSTREAM" ]]; then
+    git -C "$ARCHON_SRC_DIR" remote add upstream "$UPSTREAM_URL"
+    ok "Added upstream remote (coleam00/archon)"
+  elif [[ "$CURRENT_UPSTREAM" != "$UPSTREAM_URL" ]]; then
+    git -C "$ARCHON_SRC_DIR" remote set-url upstream "$UPSTREAM_URL"
+    ok "Fixed upstream remote URL"
+  fi
 fi
 
 # Prepare .env in repository
@@ -363,7 +386,7 @@ if [[ $DO_START -eq 1 ]]; then
   echo "==> Phase 3: Starting Archon stack"
   ARCHON_UP_ARGS=""
   [[ $FRESH_INSTALL -eq 1 ]] && ARCHON_UP_ARGS="--fresh"
-  su - "$CURRENT_USER" -c "cd '$ROOT_DIR' && bash ./archon-up.sh $ARCHON_UP_ARGS"
+  su - "$CURRENT_USER" -c "export ARCHON_SRC_DIR_OVERRIDE='$ARCHON_SRC_DIR'; cd '$ROOT_DIR' && bash ./archon-up.sh $ARCHON_UP_ARGS"
 else
   echo ""
   FRESH_MSG=""
