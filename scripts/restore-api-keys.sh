@@ -20,8 +20,8 @@ if [[ -z "$SUPABASE_SERVICE_KEY_VAL" ]]; then
   exit 1
 fi
 
-# Database connection (defaults for local Supabase)
-DB_HOST="${DB_HOST:-localhost}"
+# Database connection (defaults for Docker network - container name)
+DB_HOST="${DB_HOST:-supabase_db_supabase}"
 DB_PORT="${DB_PORT:-5432}"
 DB_USER="${DB_USER:-postgres}"
 DB_PASSWORD="${DB_PASSWORD:-postgres}"
