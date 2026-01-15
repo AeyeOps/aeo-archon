@@ -3,9 +3,9 @@
 # Usage:
 #   sudo ./bootstrap-archon.sh [--repo <url>] [--branch <name>] [--dir <path>] [--no-start]
 # Defaults:
-#   repo: https://github.com/coleam00/archon.git
-#   branch: aeyeops/custom-main
-#   dir: /opt/aeo/archon-src
+#   repo: https://github.com/aeyeops/archon.git
+#   branch: aeyeops-custom-main
+#   dir: ./archon-src (relative to script location)
 
 set -Eeuo pipefail
 
@@ -20,9 +20,9 @@ err(){ echo -e "${RED}✗${NC} $1"; }
 
 # Configuration
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ARCHON_REPO_URL="${ARCHON_REPO_URL:-https://github.com/coleam00/archon.git}"
-ARCHON_BRANCH="${ARCHON_BRANCH:-aeyeops/custom-main}"
-ARCHON_SRC_DIR_DEFAULT="${ARCHON_SRC_DIR_OVERRIDE:-/opt/aeo/archon-src}"
+ARCHON_REPO_URL="${ARCHON_REPO_URL:-https://github.com/aeyeops/archon.git}"
+ARCHON_BRANCH="${ARCHON_BRANCH:-aeyeops-custom-main}"
+ARCHON_SRC_DIR_DEFAULT="${ARCHON_SRC_DIR_OVERRIDE:-$ROOT_DIR/archon-src}"
 ARCHON_SRC_DIR="$ARCHON_SRC_DIR_DEFAULT"
 NODE_VERSION_REQUIRED="${NODE_VERSION_REQUIRED:-lts/*}"
 DO_START=1
@@ -43,9 +43,9 @@ Usage: $(basename "$0") [--repo <url>] [--branch <name>] [--dir <path>] [--no-st
 Bootstrap Archon by installing system prerequisites, cloning/updating repository, and launching.
 
 Options:
-  --repo <url>    Git repository URL (default: https://github.com/coleam00/archon.git)
-  --branch <name> Git branch name (default: aeyeops/custom-main)
-  --dir <path>    Installation directory (default: /opt/aeo/archon-src)
+  --repo <url>    Git repository URL (default: https://github.com/aeyeops/archon.git)
+  --branch <name> Git branch name (default: aeyeops-custom-main)
+  --dir <path>    Installation directory (default: ./archon-src)
   --no-start      Skip launching after bootstrap
   --fresh         Perform fresh database install (wipe and reinstall schema)
   -h, --help      Show this help message
@@ -249,6 +249,15 @@ echo "==> Phase 2: Setting up Archon repository"
 # Clone or update repository
 if [[ -d "$ARCHON_SRC_DIR/.git" ]]; then
   echo "Repository exists at $ARCHON_SRC_DIR; ensuring branch $ARCHON_BRANCH..."
+
+  # Ensure origin points to the correct repository (fork, not upstream)
+  CURRENT_ORIGIN=$(git -C "$ARCHON_SRC_DIR" remote get-url origin 2>/dev/null || true)
+  if [[ -n "$CURRENT_ORIGIN" && "$CURRENT_ORIGIN" != "$ARCHON_REPO_URL" ]]; then
+    warn "Origin points to $CURRENT_ORIGIN (expected $ARCHON_REPO_URL)"
+    git -C "$ARCHON_SRC_DIR" remote set-url origin "$ARCHON_REPO_URL"
+    ok "Fixed origin remote URL"
+  fi
+
   CURRENT_BRANCH=$(git -C "$ARCHON_SRC_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
   if [[ "$CURRENT_BRANCH" != "$ARCHON_BRANCH" ]]; then
     git -C "$ARCHON_SRC_DIR" fetch --all --prune || warn "Fetch failed; continuing with existing refs"
@@ -275,6 +284,20 @@ else
   echo "Cloning $ARCHON_REPO_URL into $ARCHON_SRC_DIR..."
   git clone --depth 1 --branch "$ARCHON_BRANCH" "$ARCHON_REPO_URL" "$ARCHON_SRC_DIR"
   ok "Repository cloned"
+fi
+
+# Ensure upstream remote exists for sync-main.sh workflow
+# (origin = fork, upstream = coleam00/archon for syncing)
+UPSTREAM_URL="https://github.com/coleam00/archon.git"
+if [[ -d "$ARCHON_SRC_DIR/.git" ]]; then
+  CURRENT_UPSTREAM=$(git -C "$ARCHON_SRC_DIR" remote get-url upstream 2>/dev/null || true)
+  if [[ -z "$CURRENT_UPSTREAM" ]]; then
+    git -C "$ARCHON_SRC_DIR" remote add upstream "$UPSTREAM_URL"
+    ok "Added upstream remote (coleam00/archon)"
+  elif [[ "$CURRENT_UPSTREAM" != "$UPSTREAM_URL" ]]; then
+    git -C "$ARCHON_SRC_DIR" remote set-url upstream "$UPSTREAM_URL"
+    ok "Fixed upstream remote URL"
+  fi
 fi
 
 # Prepare .env in repository
@@ -309,7 +332,7 @@ if [[ $DO_START -eq 1 ]]; then
   echo "==> Phase 3: Starting Archon stack"
   ARCHON_UP_ARGS=""
   [[ $FRESH_INSTALL -eq 1 ]] && ARCHON_UP_ARGS="--fresh"
-  su - "$CURRENT_USER" -c "cd '$ROOT_DIR' && bash ./archon-up.sh $ARCHON_UP_ARGS"
+  su - "$CURRENT_USER" -c "export ARCHON_SRC_DIR_OVERRIDE='$ARCHON_SRC_DIR'; cd '$ROOT_DIR' && bash ./archon-up.sh $ARCHON_UP_ARGS"
 else
   echo ""
   FRESH_MSG=""
