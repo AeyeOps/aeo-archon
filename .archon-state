@@ -1,0 +1,7 @@
+# Archon state - generated 2025-12-27T17:16:49-05:00
+SUPABASE_CLI_VERSION=2.70.5
+STARTED_AT=2025-12-27T17:16:57-05:00
+ARCHON_COMMIT=4e3a3e25b9ac7c8ccc4177af7cc70bc984565168
+ARCHON_BRANCH=fix/docker-deployment-improvements
+ARCHON_REPO_URL=https://github.com/AeyeOps/archon.git
+STORAGE_MIGRATIONS=50

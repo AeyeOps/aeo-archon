@@ -9,6 +9,12 @@
 .DS_Store
 *.log
 
+# Generated audio (TTS)
+.claude/audio/
+
+# Runtime backups
+backups/
+
 # Bootstrap clone (source-based mode)
 archon-src/
 

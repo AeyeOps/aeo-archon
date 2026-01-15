@@ -1,699 +1,267 @@
 {
-  "version": 2,
-  "dashboardId": "archon_overview_001",
+  "dashboardId": "archon_overview",
   "title": "Archon Stack Overview",
-  "description": "Comprehensive observability dashboard for Archon services and Claude Code telemetry",
-  "role": "",
-  "owner": "AeyeOps",
-  "created": "2025-12-27T00:00:00.000Z",
+  "description": "Observability dashboard for Archon services and Claude Code telemetry",
+  "version": 5,
+  "owner": "admin@archon.local",
+  "created": "2025-12-27T00:00:00Z",
+  "updatedAt": "2025-12-27T00:00:00Z",
+  "role": "viewer",
+  "defaultDatetimeDuration": "1h",
   "tabs": [
     {
-      "tabId": "overview",
+      "tabId": "overview_tab",
       "name": "Overview",
       "panels": [
         {
-          "id": "Panel_TotalTraces",
-          "type": "metric",
-          "title": "Total Traces (24h)",
-          "description": "Total number of traces in the last 24 hours",
-          "config": {
-            "show_legends": false,
-            "unit": ""
-          },
-          "queryType": "sql",
-          "queries": [
-            {
-              "query": "SELECT count(*) as value FROM \"default\" WHERE _timestamp >= NOW() - INTERVAL '24 HOURS'",
-              "customQuery": true,
-              "fields": {
-                "stream": "default",
-                "stream_type": "traces",
-                "x": [],
-                "y": [
-                  {
-                    "label": "Total",
-                    "alias": "value",
-                    "column": "*",
-                    "aggregationFunction": "count"
-                  }
-                ],
-                "z": [],
-                "filter": []
-              },
-              "config": {}
-            }
-          ],
-          "layout": {
-            "x": 0,
-            "y": 0,
-            "w": 3,
-            "h": 4,
-            "i": 1
-          }
-        },
-        {
-          "id": "Panel_ErrorRate",
-          "type": "metric",
-          "title": "Error Rate",
-          "description": "Percentage of traces with errors",
-          "config": {
-            "show_legends": false,
-            "unit": "%"
-          },
-          "queryType": "sql",
-          "queries": [
-            {
-              "query": "SELECT ROUND(100.0 * COUNT(CASE WHEN status_code = 2 THEN 1 END) / NULLIF(COUNT(*), 0), 2) as value FROM \"default\" WHERE _timestamp >= NOW() - INTERVAL '24 HOURS'",
-              "customQuery": true,
-              "fields": {
-                "stream": "default",
-                "stream_type": "traces",
-                "x": [],
-                "y": [],
-                "z": [],
-                "filter": []
-              },
-              "config": {}
-            }
-          ],
-          "layout": {
-            "x": 3,
-            "y": 0,
-            "w": 3,
-            "h": 4,
-            "i": 2
-          }
-        },
-        {
-          "id": "Panel_Services",
-          "type": "metric",
-          "title": "Active Services",
-          "description": "Number of unique services reporting",
-          "config": {
-            "show_legends": false,
-            "unit": ""
-          },
-          "queryType": "sql",
-          "queries": [
-            {
-              "query": "SELECT count(DISTINCT service_name) as value FROM \"default\" WHERE _timestamp >= NOW() - INTERVAL '24 HOURS'",
-              "customQuery": true,
-              "fields": {
-                "stream": "default",
-                "stream_type": "traces",
-                "x": [],
-                "y": [],
-                "z": [],
-                "filter": []
-              },
-              "config": {}
-            }
-          ],
-          "layout": {
-            "x": 6,
-            "y": 0,
-            "w": 3,
-            "h": 4,
-            "i": 3
-          }
-        },
-        {
-          "id": "Panel_AvgLatency",
-          "type": "metric",
-          "title": "Avg Latency",
-          "description": "Average span duration",
-          "config": {
-            "show_legends": false,
-            "unit": "ms"
-          },
-          "queryType": "sql",
-          "queries": [
-            {
-              "query": "SELECT ROUND(AVG(duration) / 1000000, 2) as value FROM \"default\" WHERE _timestamp >= NOW() - INTERVAL '1 HOUR'",
-              "customQuery": true,
-              "fields": {
-                "stream": "default",
-                "stream_type": "traces",
-                "x": [],
-                "y": [],
-                "z": [],
-                "filter": []
-              },
-              "config": {}
-            }
-          ],
-          "layout": {
-            "x": 9,
-            "y": 0,
-            "w": 3,
-            "h": 4,
-            "i": 4
-          }
-        },
-        {
-          "id": "Panel_TracesOverTime",
+          "id": "trace_count",
           "type": "line",
           "title": "Traces Over Time",
-          "description": "Trace count aggregated by time",
-          "config": {
-            "show_legends": true,
-            "legends_position": "bottom"
-          },
-          "queryType": "sql",
-          "queries": [
-            {
-              "query": "SELECT histogram(_timestamp) as x_axis, count(*) as y_axis FROM \"default\" GROUP BY x_axis ORDER BY x_axis",
-              "customQuery": false,
-              "fields": {
-                "stream": "default",
-                "stream_type": "traces",
-                "x": [
-                  {
-                    "label": "Time",
-                    "alias": "x_axis",
-                    "column": "_timestamp",
-                    "aggregationFunction": "histogram"
-                  }
-                ],
-                "y": [
-                  {
-                    "label": "Count",
-                    "alias": "y_axis",
-                    "column": "*",
-                    "color": "#5960b2",
-                    "aggregationFunction": "count"
-                  }
-                ],
-                "z": [],
-                "filter": []
-              },
-              "config": {}
-            }
-          ],
+          "description": "Number of traces per minute",
           "layout": {
             "x": 0,
-            "y": 4,
-            "w": 6,
-            "h": 8,
-            "i": 5
+            "y": 0,
+            "width": 12,
+            "height": 5
+          },
+          "queries": [
+            {
+              "query": "SELECT date_bin(interval '1 minute', _timestamp) as 'Time', count(*) as 'Count' FROM \"archon_server\" GROUP BY date_bin(interval '1 minute', _timestamp) ORDER BY 'Time'",
+              "type": "sql",
+              "fields": {}
+            }
+          ],
+          "queryType": "sql",
+          "config": {
+            "type": "line",
+            "legend": {
+              "enabled": true,
+              "position": "bottom"
+            },
+            "colors": ["#5470c6"]
           }
         },
         {
-          "id": "Panel_ServiceBreakdown",
+          "id": "service_breakdown",
           "type": "pie",
           "title": "Traces by Service",
           "description": "Distribution of traces across services",
-          "config": {
-            "show_legends": true,
-            "legends_position": "right"
+          "layout": {
+            "x": 0,
+            "y": 5,
+            "width": 6,
+            "height": 5
           },
-          "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT service_name, count(*) as count FROM \"default\" WHERE _timestamp >= NOW() - INTERVAL '1 HOUR' GROUP BY service_name ORDER BY count DESC LIMIT 10",
-              "customQuery": true,
-              "fields": {
-                "stream": "default",
-                "stream_type": "traces",
-                "x": [
-                  {
-                    "label": "Service",
-                    "alias": "service_name",
-                    "column": "service_name"
-                  }
-                ],
-                "y": [
-                  {
-                    "label": "Count",
-                    "alias": "count",
-                    "column": "*",
-                    "aggregationFunction": "count"
-                  }
-                ],
-                "z": [],
-                "filter": []
-              },
-              "config": {}
+              "query": "SELECT service_name as 'Service', count(*) as 'Count' FROM \"archon_server\" GROUP BY service_name ORDER BY 'Count' DESC LIMIT 10",
+              "type": "sql",
+              "fields": {}
             }
           ],
+          "queryType": "sql",
+          "config": {
+            "type": "pie",
+            "legend": {
+              "enabled": true,
+              "position": "right"
+            }
+          }
+        },
+        {
+          "id": "avg_latency",
+          "type": "line",
+          "title": "Average Latency (ms)",
+          "description": "Average span duration over time",
           "layout": {
             "x": 6,
-            "y": 4,
-            "w": 6,
-            "h": 8,
-            "i": 6
+            "y": 5,
+            "width": 6,
+            "height": 5
+          },
+          "queries": [
+            {
+              "query": "SELECT date_bin(interval '1 minute', _timestamp) as 'Time', AVG(duration) / 1000000 as 'Avg Latency (ms)' FROM \"archon_server\" GROUP BY date_bin(interval '1 minute', _timestamp) ORDER BY 'Time'",
+              "type": "sql",
+              "fields": {}
+            }
+          ],
+          "queryType": "sql",
+          "config": {
+            "type": "line",
+            "legend": {
+              "enabled": true
+            },
+            "colors": ["#91cc75"]
+          }
+        },
+        {
+          "id": "top_spans",
+          "type": "table",
+          "title": "Top Span Names",
+          "description": "Most frequent operations",
+          "layout": {
+            "x": 0,
+            "y": 10,
+            "width": 12,
+            "height": 5
+          },
+          "queries": [
+            {
+              "query": "SELECT span_name as 'Operation', count(*) as 'Count', ROUND(AVG(duration) / 1000000, 2) as 'Avg ms' FROM \"archon_server\" GROUP BY span_name ORDER BY 'Count' DESC LIMIT 15",
+              "type": "sql",
+              "fields": {}
+            }
+          ],
+          "queryType": "sql",
+          "config": {
+            "type": "table"
           }
         }
       ]
     },
     {
-      "tabId": "services",
-      "name": "Services",
+      "tabId": "errors_tab",
+      "name": "Errors",
       "panels": [
         {
-          "id": "Panel_ServiceLatency",
-          "type": "bar",
-          "title": "Latency by Service (p95)",
-          "description": "95th percentile latency per service",
-          "config": {
-            "show_legends": true
-          },
-          "queryType": "sql",
-          "queries": [
-            {
-              "query": "SELECT service_name, APPROX_PERCENTILE_CONT(duration / 1000000, 0.95) as p95_ms FROM \"default\" WHERE _timestamp >= NOW() - INTERVAL '1 HOUR' GROUP BY service_name ORDER BY p95_ms DESC LIMIT 10",
-              "customQuery": true,
-              "fields": {
-                "stream": "default",
-                "stream_type": "traces",
-                "x": [
-                  {
-                    "label": "Service",
-                    "alias": "service_name",
-                    "column": "service_name"
-                  }
-                ],
-                "y": [
-                  {
-                    "label": "P95 Latency (ms)",
-                    "alias": "p95_ms",
-                    "column": "duration"
-                  }
-                ],
-                "z": [],
-                "filter": []
-              },
-              "config": {}
-            }
-          ],
+          "id": "error_traces",
+          "type": "line",
+          "title": "Error Traces Over Time",
+          "description": "Traces with error status",
           "layout": {
             "x": 0,
             "y": 0,
-            "w": 6,
-            "h": 8,
-            "i": 1
+            "width": 12,
+            "height": 5
+          },
+          "queries": [
+            {
+              "query": "SELECT date_bin(interval '1 minute', _timestamp) as 'Time', count(*) as 'Errors' FROM \"archon_server\" WHERE status_code = 2 GROUP BY date_bin(interval '1 minute', _timestamp) ORDER BY 'Time'",
+              "type": "sql",
+              "fields": {}
+            }
+          ],
+          "queryType": "sql",
+          "config": {
+            "type": "line",
+            "legend": {
+              "enabled": true
+            },
+            "colors": ["#ee6666"]
           }
         },
         {
-          "id": "Panel_ServiceErrors",
+          "id": "error_by_service",
           "type": "bar",
           "title": "Errors by Service",
-          "description": "Error count per service",
-          "config": {
-            "show_legends": true
+          "description": "Error distribution across services",
+          "layout": {
+            "x": 0,
+            "y": 5,
+            "width": 6,
+            "height": 5
           },
-          "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT service_name, count(*) as errors FROM \"default\" WHERE _timestamp >= NOW() - INTERVAL '1 HOUR' AND status_code = 2 GROUP BY service_name ORDER BY errors DESC LIMIT 10",
-              "customQuery": true,
-              "fields": {
-                "stream": "default",
-                "stream_type": "traces",
-                "x": [
-                  {
-                    "label": "Service",
-                    "alias": "service_name",
-                    "column": "service_name"
-                  }
-                ],
-                "y": [
-                  {
-                    "label": "Errors",
-                    "alias": "errors",
-                    "column": "*",
-                    "color": "#e53935",
-                    "aggregationFunction": "count"
-                  }
-                ],
-                "z": [],
-                "filter": []
-              },
-              "config": {}
+              "query": "SELECT service_name as 'Service', count(*) as 'Errors' FROM \"archon_server\" WHERE status_code = 2 GROUP BY service_name ORDER BY 'Errors' DESC",
+              "type": "sql",
+              "fields": {}
             }
           ],
-          "layout": {
-            "x": 6,
-            "y": 0,
-            "w": 6,
-            "h": 8,
-            "i": 2
+          "queryType": "sql",
+          "config": {
+            "type": "bar",
+            "legend": {
+              "enabled": true
+            },
+            "colors": ["#ee6666"]
           }
         },
         {
-          "id": "Panel_ServiceThroughput",
-          "type": "line",
-          "title": "Throughput by Service",
-          "description": "Trace count per service over time",
-          "config": {
-            "show_legends": true,
-            "legends_position": "bottom"
+          "id": "error_by_span",
+          "type": "bar",
+          "title": "Errors by Operation",
+          "description": "Which operations are failing",
+          "layout": {
+            "x": 6,
+            "y": 5,
+            "width": 6,
+            "height": 5
           },
-          "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT histogram(_timestamp) as time, service_name, count(*) as count FROM \"default\" GROUP BY time, service_name ORDER BY time",
-              "customQuery": true,
-              "fields": {
-                "stream": "default",
-                "stream_type": "traces",
-                "x": [
-                  {
-                    "label": "Time",
-                    "alias": "time",
-                    "column": "_timestamp",
-                    "aggregationFunction": "histogram"
-                  }
-                ],
-                "y": [
-                  {
-                    "label": "Count",
-                    "alias": "count",
-                    "column": "*",
-                    "aggregationFunction": "count"
-                  }
-                ],
-                "z": [
-                  {
-                    "label": "Service",
-                    "alias": "service_name",
-                    "column": "service_name"
-                  }
-                ],
-                "filter": []
-              },
-              "config": {}
+              "query": "SELECT span_name as 'Operation', count(*) as 'Errors' FROM \"archon_server\" WHERE status_code = 2 GROUP BY span_name ORDER BY 'Errors' DESC LIMIT 10",
+              "type": "sql",
+              "fields": {}
             }
           ],
-          "layout": {
-            "x": 0,
-            "y": 8,
-            "w": 12,
-            "h": 8,
-            "i": 3
+          "queryType": "sql",
+          "config": {
+            "type": "bar",
+            "legend": {
+              "enabled": true
+            },
+            "colors": ["#fc8452"]
           }
         }
       ]
     },
     {
-      "tabId": "claude_code",
-      "name": "Claude Code",
+      "tabId": "latency_tab",
+      "name": "Latency",
       "panels": [
         {
-          "id": "Panel_ClaudePrompts",
-          "type": "metric",
-          "title": "User Prompts (24h)",
-          "description": "Total Claude Code prompts",
-          "config": {
-            "show_legends": false
-          },
-          "queryType": "sql",
-          "queries": [
-            {
-              "query": "SELECT count(*) as value FROM \"default\" WHERE service_name = 'claude-code' AND _timestamp >= NOW() - INTERVAL '24 HOURS'",
-              "customQuery": true,
-              "fields": {
-                "stream": "default",
-                "stream_type": "logs",
-                "x": [],
-                "y": [],
-                "z": [],
-                "filter": []
-              },
-              "config": {}
-            }
-          ],
+          "id": "latency_distribution",
+          "type": "line",
+          "title": "Latency Distribution Over Time",
+          "description": "p50, p95, p99 latency",
           "layout": {
             "x": 0,
             "y": 0,
-            "w": 4,
-            "h": 4,
-            "i": 1
+            "width": 12,
+            "height": 6
+          },
+          "queries": [
+            {
+              "query": "SELECT date_bin(interval '1 minute', _timestamp) as 'Time', AVG(duration) / 1000000 as 'avg_ms', MAX(duration) / 1000000 as 'max_ms' FROM \"archon_server\" GROUP BY date_bin(interval '1 minute', _timestamp) ORDER BY 'Time'",
+              "type": "sql",
+              "fields": {}
+            }
+          ],
+          "queryType": "sql",
+          "config": {
+            "type": "line",
+            "legend": {
+              "enabled": true
+            }
           }
         },
         {
-          "id": "Panel_ClaudeTools",
-          "type": "metric",
-          "title": "Tool Calls (24h)",
-          "description": "Total tool executions",
-          "config": {
-            "show_legends": false
-          },
-          "queryType": "sql",
-          "queries": [
-            {
-              "query": "SELECT count(*) as value FROM \"default\" WHERE service_name = 'claude-code' AND span_name LIKE '%tool%' AND _timestamp >= NOW() - INTERVAL '24 HOURS'",
-              "customQuery": true,
-              "fields": {
-                "stream": "default",
-                "stream_type": "traces",
-                "x": [],
-                "y": [],
-                "z": [],
-                "filter": []
-              },
-              "config": {}
-            }
-          ],
-          "layout": {
-            "x": 4,
-            "y": 0,
-            "w": 4,
-            "h": 4,
-            "i": 2
-          }
-        },
-        {
-          "id": "Panel_ClaudeErrors",
-          "type": "metric",
-          "title": "API Errors (24h)",
-          "description": "Claude API errors",
-          "config": {
-            "show_legends": false
-          },
-          "queryType": "sql",
-          "queries": [
-            {
-              "query": "SELECT count(*) as value FROM \"default\" WHERE service_name = 'claude-code' AND status_code = 2 AND _timestamp >= NOW() - INTERVAL '24 HOURS'",
-              "customQuery": true,
-              "fields": {
-                "stream": "default",
-                "stream_type": "traces",
-                "x": [],
-                "y": [],
-                "z": [],
-                "filter": []
-              },
-              "config": {}
-            }
-          ],
-          "layout": {
-            "x": 8,
-            "y": 0,
-            "w": 4,
-            "h": 4,
-            "i": 3
-          }
-        },
-        {
-          "id": "Panel_ClaudeActivity",
-          "type": "line",
-          "title": "Claude Code Activity Over Time",
-          "description": "Events from Claude Code CLI",
-          "config": {
-            "show_legends": true,
-            "legends_position": "bottom"
-          },
-          "queryType": "sql",
-          "queries": [
-            {
-              "query": "SELECT histogram(_timestamp) as time, count(*) as count FROM \"default\" WHERE service_name = 'claude-code' GROUP BY time ORDER BY time",
-              "customQuery": true,
-              "fields": {
-                "stream": "default",
-                "stream_type": "traces",
-                "x": [
-                  {
-                    "label": "Time",
-                    "alias": "time",
-                    "column": "_timestamp",
-                    "aggregationFunction": "histogram"
-                  }
-                ],
-                "y": [
-                  {
-                    "label": "Events",
-                    "alias": "count",
-                    "column": "*",
-                    "color": "#7c4dff",
-                    "aggregationFunction": "count"
-                  }
-                ],
-                "z": [],
-                "filter": []
-              },
-              "config": {}
-            }
-          ],
-          "layout": {
-            "x": 0,
-            "y": 4,
-            "w": 12,
-            "h": 8,
-            "i": 4
-          }
-        }
-      ]
-    },
-    {
-      "tabId": "archon",
-      "name": "Archon Backend",
-      "panels": [
-        {
-          "id": "Panel_ArchonServer",
-          "type": "line",
-          "title": "Archon Server Traces",
-          "description": "archon-server trace activity",
-          "config": {
-            "show_legends": true
-          },
-          "queryType": "sql",
-          "queries": [
-            {
-              "query": "SELECT histogram(_timestamp) as time, count(*) as count FROM \"default\" WHERE service_name = 'archon-server' GROUP BY time ORDER BY time",
-              "customQuery": true,
-              "fields": {
-                "stream": "default",
-                "stream_type": "traces",
-                "x": [
-                  {
-                    "label": "Time",
-                    "alias": "time",
-                    "column": "_timestamp",
-                    "aggregationFunction": "histogram"
-                  }
-                ],
-                "y": [
-                  {
-                    "label": "Count",
-                    "alias": "count",
-                    "column": "*",
-                    "color": "#00bcd4",
-                    "aggregationFunction": "count"
-                  }
-                ],
-                "z": [],
-                "filter": []
-              },
-              "config": {}
-            }
-          ],
-          "layout": {
-            "x": 0,
-            "y": 0,
-            "w": 6,
-            "h": 8,
-            "i": 1
-          }
-        },
-        {
-          "id": "Panel_ArchonMCP",
-          "type": "line",
-          "title": "Archon MCP Traces",
-          "description": "archon-mcp trace activity",
-          "config": {
-            "show_legends": true
-          },
-          "queryType": "sql",
-          "queries": [
-            {
-              "query": "SELECT histogram(_timestamp) as time, count(*) as count FROM \"default\" WHERE service_name = 'archon-mcp' GROUP BY time ORDER BY time",
-              "customQuery": true,
-              "fields": {
-                "stream": "default",
-                "stream_type": "traces",
-                "x": [
-                  {
-                    "label": "Time",
-                    "alias": "time",
-                    "column": "_timestamp",
-                    "aggregationFunction": "histogram"
-                  }
-                ],
-                "y": [
-                  {
-                    "label": "Count",
-                    "alias": "count",
-                    "column": "*",
-                    "color": "#ff9800",
-                    "aggregationFunction": "count"
-                  }
-                ],
-                "z": [],
-                "filter": []
-              },
-              "config": {}
-            }
-          ],
-          "layout": {
-            "x": 6,
-            "y": 0,
-            "w": 6,
-            "h": 8,
-            "i": 2
-          }
-        },
-        {
-          "id": "Panel_ArchonEndpoints",
+          "id": "slowest_spans",
           "type": "table",
-          "title": "Top Endpoints",
-          "description": "Most frequently called endpoints",
-          "config": {
-            "show_legends": false
-          },
-          "queryType": "sql",
-          "queries": [
-            {
-              "query": "SELECT span_name as endpoint, count(*) as calls, ROUND(AVG(duration) / 1000000, 2) as avg_ms FROM \"default\" WHERE service_name LIKE 'archon%' AND _timestamp >= NOW() - INTERVAL '1 HOUR' GROUP BY span_name ORDER BY calls DESC LIMIT 15",
-              "customQuery": true,
-              "fields": {
-                "stream": "default",
-                "stream_type": "traces",
-                "x": [],
-                "y": [],
-                "z": [],
-                "filter": []
-              },
-              "config": {}
-            }
-          ],
+          "title": "Slowest Operations",
+          "description": "Operations with highest average latency",
           "layout": {
             "x": 0,
-            "y": 8,
-            "w": 12,
-            "h": 8,
-            "i": 3
+            "y": 6,
+            "width": 12,
+            "height": 5
+          },
+          "queries": [
+            {
+              "query": "SELECT span_name as 'Operation', count(*) as 'Count', ROUND(AVG(duration) / 1000000, 2) as 'Avg ms', ROUND(MAX(duration) / 1000000, 2) as 'Max ms' FROM \"archon_server\" GROUP BY span_name ORDER BY 'Avg ms' DESC LIMIT 15",
+              "type": "sql",
+              "fields": {}
+            }
+          ],
+          "queryType": "sql",
+          "config": {
+            "type": "table"
           }
         }
       ]
     }
   ],
-  "variables": {
-    "list": [
-      {
-        "name": "service",
-        "label": "Service",
-        "type": "query",
-        "query_data": {
-          "stream_type": "traces",
-          "stream": "default",
-          "field": "service_name"
-        },
-        "value": "",
-        "options": []
-      }
-    ],
-    "showDynamicFilters": true
-  },
-  "layout": []
+  "variables": []
 }

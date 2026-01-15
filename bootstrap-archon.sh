@@ -2,9 +2,9 @@
 # Bootstrap Archon: install prerequisites, clone/update repo, and launch
 # Usage:
 #   sudo ./bootstrap-archon.sh [--repo <url>] [--branch <name>] [--dir <path>] [--no-start]
-# Defaults:
-#   repo: https://github.com/coleam00/archon.git
-#   branch: aeyeops/custom-main
+# Defaults (can be overridden via .archon-state or environment):
+#   repo: from .archon-state or https://github.com/coleam00/archon.git
+#   branch: from .archon-state or aeyeops/custom-main
 #   dir: /opt/aeo/archon-src
 
 set -Eeuo pipefail
@@ -24,6 +24,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Source shared recovery functions if available
 if [[ -f "$ROOT_DIR/lib/supabase-recovery.sh" ]]; then
   source "$ROOT_DIR/lib/supabase-recovery.sh"
+fi
+
+# Source state file if it exists (for ARCHON_REPO_URL, ARCHON_BRANCH, etc.)
+if [[ -f "$ROOT_DIR/.archon-state" ]]; then
+  source "$ROOT_DIR/.archon-state"
 fi
 
 # Version pinning (inherit from recovery lib or set default)
