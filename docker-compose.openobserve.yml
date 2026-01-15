@@ -4,6 +4,7 @@
 # This file extends the main archon docker-compose.yml with:
 # - OpenObserve service for logs, traces, and metrics
 # - OTEL environment variables for all Archon services
+# - Supabase network connectivity for archon services
 #
 # Web UI: http://localhost:5080
 # Credentials: admin@archon.local / archon123
@@ -27,6 +28,9 @@ services:
     # Services use depends_on: service_started instead of service_healthy
 
   archon-server:
+    networks:
+      - app-network
+      - supabase-network
     environment:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://openobserve:5080/api/default
       - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
@@ -43,6 +47,9 @@ services:
         condition: service_started
 
   archon-mcp:
+    networks:
+      - app-network
+      - supabase-network
     environment:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://openobserve:5080/api/default
       - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
@@ -59,6 +66,9 @@ services:
         condition: service_started
 
   archon-agents:
+    networks:
+      - app-network
+      - supabase-network
     environment:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://openobserve:5080/api/default
       - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
@@ -73,6 +83,35 @@ services:
     depends_on:
       openobserve:
         condition: service_started
+
+  archon-frontend:
+    networks:
+      - app-network
+      - supabase-network
+
+  archon-agent-work-orders:
+    networks:
+      - app-network
+      - supabase-network
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://openobserve:5080/api/default
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic YWRtaW5AYXJjaG9uLmxvY2FsOmFyY2hvbjEyMw==
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_LOGS_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=otlp
+      - OTEL_TRACES_SAMPLER=always_on
+      - OTEL_SERVICE_NAME=archon-agent-work-orders
+      - LOGFIRE_SEND_TO_CLOUD=false
+      - LOGFIRE_ENABLED=true
+    depends_on:
+      openobserve:
+        condition: service_started
+
+networks:
+  supabase-network:
+    name: supabase_network_supabase
+    external: true
 
 volumes:
   openobserve-data:

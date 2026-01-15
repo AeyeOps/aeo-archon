@@ -190,12 +190,21 @@ record_versions(){
   local state_file="$ROOT_DIR/.archon-state"
   local archon_src_dir="${ARCHON_SRC_DIR:-/opt/aeo/archon-src}"
 
+  # Preserve ARCHON_REPO_URL from existing state (required, no fallback)
+  local repo_url="${ARCHON_REPO_URL:-}"
+  if [[ -z "$repo_url" && -f "$state_file" ]]; then
+    repo_url=$(grep -E '^ARCHON_REPO_URL=' "$state_file" | sed 's/^ARCHON_REPO_URL=//' || true)
+  fi
+
   {
     echo "# Archon state - generated $(date -Iseconds)"
     echo "SUPABASE_CLI_VERSION=$(npx -y supabase@${SUPABASE_VERSION} --version 2>/dev/null | head -1)"
     echo "STARTED_AT=$(date -Iseconds)"
     if [[ -d "$archon_src_dir/.git" ]]; then
       echo "ARCHON_COMMIT=$(git -C "$archon_src_dir" rev-parse HEAD 2>/dev/null)"
+    fi
+    [[ -n "$repo_url" ]] && echo "ARCHON_REPO_URL=$repo_url"
+    if [[ -d "$archon_src_dir/.git" ]]; then
       echo "ARCHON_BRANCH=$(git -C "$archon_src_dir" rev-parse --abbrev-ref HEAD 2>/dev/null)"
     fi
     echo "STORAGE_MIGRATIONS=$(docker exec supabase_db_supabase psql -U postgres -t -c "SELECT COUNT(*) FROM storage.migrations;" 2>/dev/null | tr -d ' ')"

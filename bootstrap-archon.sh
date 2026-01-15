@@ -2,12 +2,25 @@
 # Bootstrap Archon: install prerequisites, clone/update repo, and launch
 # Usage:
 #   sudo ./bootstrap-archon.sh [--repo <url>] [--branch <name>] [--dir <path>] [--no-start]
-# Defaults (can be overridden via .archon-state or environment):
-#   repo: from .archon-state or https://github.com/coleam00/archon.git
-#   branch: from .archon-state or aeyeops/custom-main
-#   dir: /opt/aeo/archon-src
+# Configuration (via .archon-state or environment - no fallbacks):
+#   ARCHON_REPO_URL: REQUIRED - git repository URL (fails if not set)
+#   ARCHON_BRANCH: branch name (default: main)
+#   ARCHON_SRC_DIR: /opt/aeo/archon-src
+# Logs: Automatically written to bootstrap.log in script directory
 
 set -Eeuo pipefail
+
+# Auto-logging: tee all output to bootstrap.log
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_FILE="$SCRIPT_DIR/bootstrap.log"
+if [[ -z "${BOOTSTRAP_LOGGING:-}" ]]; then
+  export BOOTSTRAP_LOGGING=1
+  exec > >(tee -a "$LOG_FILE") 2>&1
+  echo ""
+  echo "=========================================="
+  echo "Bootstrap started: $(date -Iseconds)"
+  echo "=========================================="
+fi
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -34,8 +47,15 @@ fi
 # Version pinning (inherit from recovery lib or set default)
 SUPABASE_VERSION="${SUPABASE_VERSION:-2.70.5}"
 
-ARCHON_REPO_URL="${ARCHON_REPO_URL:-https://github.com/coleam00/archon.git}"
-ARCHON_BRANCH="${ARCHON_BRANCH:-aeyeops/custom-main}"
+# Repo URL must be explicitly set in .archon-state or environment - no fallback
+# When ready to switch to upstream: set ARCHON_REPO_URL=https://github.com/coleam00/archon.git
+if [[ -z "${ARCHON_REPO_URL:-}" ]]; then
+  err "ARCHON_REPO_URL not set. Configure in .archon-state or pass --repo <url>"
+  err "Current fork: https://github.com/AeyeOps/archon.git"
+  err "Upstream: https://github.com/coleam00/archon.git"
+  exit 1
+fi
+ARCHON_BRANCH="${ARCHON_BRANCH:-main}"
 ARCHON_SRC_DIR_DEFAULT="${ARCHON_SRC_DIR_OVERRIDE:-/opt/aeo/archon-src}"
 ARCHON_SRC_DIR="$ARCHON_SRC_DIR_DEFAULT"
 NODE_VERSION_REQUIRED="${NODE_VERSION_REQUIRED:-lts/*}"
@@ -59,8 +79,8 @@ Usage: $(basename "$0") [--repo <url>] [--branch <name>] [--dir <path>] [--no-st
 Bootstrap Archon by installing system prerequisites, cloning/updating repository, and launching.
 
 Options:
-  --repo <url>    Git repository URL (default: https://github.com/coleam00/archon.git)
-  --branch <name> Git branch name (default: aeyeops/custom-main)
+  --repo <url>    Git repository URL (REQUIRED if not in .archon-state)
+  --branch <name> Git branch name (default: main)
   --dir <path>    Installation directory (default: /opt/aeo/archon-src)
   --no-start      Skip launching after bootstrap
   --fresh         Perform fresh database install (wipe and reinstall schema)
@@ -350,3 +370,9 @@ else
   [[ $FRESH_INSTALL -eq 1 ]] && FRESH_MSG=" --fresh"
   ok "Bootstrap complete. To start: (cd $ROOT_DIR && bash ./archon-up.sh$FRESH_MSG)"
 fi
+
+echo ""
+echo "=========================================="
+echo "Bootstrap finished: $(date -Iseconds)"
+echo "Log: $LOG_FILE"
+echo "=========================================="

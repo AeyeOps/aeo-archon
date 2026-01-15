@@ -251,7 +251,8 @@ fi
 SKIP_COMPOSE_OBS=0
 case "$observability" in
   compose)
-    upsert_env OTEL_EXPORTER_OTLP_ENDPOINT_CONTAINER "http://openobserve:4318"
+    # OpenObserve uses 5080/api/default, not standard OTLP ports 4317/4318
+    upsert_env OTEL_EXPORTER_OTLP_ENDPOINT_CONTAINER "http://openobserve:5080/api/default"
     if container_exists openobserve; then SKIP_COMPOSE_OBS=1; ok "Reusing existing openobserve"; fi
     ;;
   script)
@@ -379,8 +380,8 @@ if [[ $enable_work_orders -eq 1 ]]; then
   ( cd "$ARCHON_SRC_DIR" && unset SUPABASE_URL && $COMPOSE_CMD --profile work-orders up -d ) || warn "Work orders profile failed to start"
 fi
 
-# OpenObserve is now started as part of the main compose (via docker-compose.openobserve.yml)
-# No need for separate network connection - it's already in app-network
+# OpenObserve + Supabase network connectivity now handled in docker-compose.openobserve.yml
+# The compose file defines supabase_network_supabase as external and connects all archon services
 
 # Verify
 check(){ curl -fsS -o /dev/null -m 5 "$1" >/dev/null 2>&1; }
