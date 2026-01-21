@@ -4,11 +4,10 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$ROOT_DIR/.env"
 
-# Source shared recovery and utility functions
-if [[ -f "$ROOT_DIR/lib/supabase-recovery.sh" ]]; then
-  source "$ROOT_DIR/lib/supabase-recovery.sh"
+# Source shared Supabase utility functions
+if [[ -f "$ROOT_DIR/lib/supabase-utils.sh" ]]; then
+  source "$ROOT_DIR/lib/supabase-utils.sh"
 fi
-COMPOSE_FILES="-f docker-compose.images.yml"
 SUPABASE_DIR="$ROOT_DIR/supabase"
 ARCHON_SRC_DIR_DEFAULT="${ARCHON_SRC_DIR_OVERRIDE:-$ROOT_DIR/archon-src}"
 ARCHON_SRC_BRANCH_DEFAULT="${ARCHON_SRC_BRANCH_OVERRIDE:-aeyeops/custom-main}"
@@ -22,6 +21,12 @@ default_single_port=1
 skip_verify=0
 run_migrations=1
 fresh_install=0
+no_port_check=0
+
+# Supabase startup configuration
+SUPABASE_START_ATTEMPTS=1  # Reduce retries for faster failure feedback
+SUPABASE_DEBUG=1           # Enable debug output for troubleshooting
+# SUPABASE_VERSION is defined in lib/supabase-utils.sh (sourced above)
 
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
   COMPOSE="docker compose"
@@ -51,9 +56,10 @@ while [[ $# -gt 0 ]]; do
     --no-verify) skip_verify=1; shift;;
     --no-migrations) run_migrations=0; shift;;
     --fresh) fresh_install=1; shift;;
+    --no-port-check) no_port_check=1; shift;;
     -h|--help)
       cat <<EOF
-Usage: $(basename "$0") [--host <ip>] [--observability compose|script|none] [--no-agents] [--no-work-orders] [--no-single-port] [--no-verify] [--no-migrations] [--fresh]
+Usage: $(basename "$0") [--host <ip>] [--observability compose|script|none] [--no-agents] [--no-work-orders] [--no-single-port] [--no-verify] [--no-migrations] [--no-port-check] [--fresh]
 Options:
   --work-orders   Enable agent work orders service (default: enabled)
   --no-work-orders Disable agent work orders service
@@ -133,6 +139,22 @@ upsert_if_empty OTEL_TRACES_SAMPLER "always_on"
 upsert_if_empty OTEL_SERVICE_NAME_ARCHON_SERVER "archon-server"
 upsert_if_empty OTEL_SERVICE_NAME_ARCHON_MCP "archon-mcp"
 upsert_if_empty OTEL_SERVICE_NAME_ARCHON_AGENTS "archon-agents"
+
+# Generate stable encryption key for credentials if not present
+# This key persists across Supabase restarts (unlike SUPABASE_SERVICE_KEY which regenerates)
+if ! grep -q "^CREDENTIAL_ENCRYPTION_KEY=" "$ENV_FILE" || grep -q "^CREDENTIAL_ENCRYPTION_KEY=\s*$" "$ENV_FILE"; then
+  # Use Python to generate Fernet-compatible key (try local python first, then docker)
+  CRED_KEY=$(python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 2>/dev/null || \
+             docker run --rm python:3.12-slim pip install -q cryptography && python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 2>/dev/null || \
+             docker run --rm python:3.12-slim bash -c "pip install -q cryptography && python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'")
+  if [[ -n "$CRED_KEY" ]]; then
+    upsert_env CREDENTIAL_ENCRYPTION_KEY "$CRED_KEY"
+    ok "Generated stable credential encryption key"
+  else
+    warn "Could not generate credential encryption key - credentials may not persist across restarts"
+  fi
+fi
+
 [[ $enable_agents -eq 1 ]] && upsert_env AGENTS_ENABLED true || upsert_env AGENTS_ENABLED false
 
 # Default images (idempotent). Compose fails fast if not present locally or pullable.
@@ -163,9 +185,11 @@ ensure_supabase_env(){
   fi
 
   # Attempt to start Supabase, with automatic recovery for storage migration issues
-  local start_attempts=3
+  local start_attempts=${SUPABASE_START_ATTEMPTS:-1}
+  local debug_flag=""
+  [[ ${SUPABASE_DEBUG:-0} -eq 1 ]] && debug_flag="--debug"
   for attempt in $(seq 1 $start_attempts); do
-    if npx -y supabase@${SUPABASE_VERSION:-2.70.5} start; then
+    if npx -y supabase@${SUPABASE_VERSION:-2.70.5} start $debug_flag; then
       break
     else
       if [[ $attempt -lt $start_attempts ]]; then
@@ -196,6 +220,47 @@ ensure_supabase_env(){
       fi
     fi
   done
+
+  # Verify port bindings - fail fast if containers started without host bindings
+  # This can happen when Docker restarts containers (via restart policy) without
+  # going through the Supabase CLI, which manages port mappings
+  if type -t verify_supabase_port_bindings >/dev/null 2>&1; then
+    if ! verify_supabase_port_bindings; then
+      if [[ $no_port_check -eq 1 ]]; then
+        warn "Port bindings missing - continuing anyway (--no-port-check)"
+      else
+        warn "Port bindings missing - attempting recovery restart..."
+        npx -y supabase@${SUPABASE_VERSION:-2.70.5} stop
+        npx -y supabase@${SUPABASE_VERSION:-2.70.5} start
+
+        # Second check - fail hard if still broken
+        if ! verify_supabase_port_bindings; then
+          err "FATAL: Supabase port bindings failed after recovery restart"
+          err "External apps will NOT be able to connect to Supabase"
+          err "Use --no-port-check to continue anyway for debugging"
+          err "Try: npx supabase@${SUPABASE_VERSION:-2.70.5} stop && npx supabase@${SUPABASE_VERSION:-2.70.5} start"
+          exit 1
+        fi
+      fi
+    fi
+  fi
+
+  # Enforce shm_size on Postgres container (Supabase CLI ignores Docker daemon defaults)
+  # This must run as root to modify hostconfig.json; skip gracefully if not privileged
+  if type -t enforce_postgres_shm_size >/dev/null 2>&1; then
+    if [[ $EUID -eq 0 ]]; then
+      enforce_postgres_shm_size
+    else
+      # Check current shm_size and warn if inadequate
+      local current_shm
+      current_shm=$(docker inspect -f '{{.HostConfig.ShmSize}}' supabase_db_supabase 2>/dev/null || echo "0")
+      if [[ "$current_shm" -lt 4294967296 ]]; then
+        warn "Postgres shm_size is $(numfmt --to=iec $current_shm 2>/dev/null || echo "${current_shm} bytes") (need 4GB for large shared_buffers)"
+        warn "Run bootstrap-archon.sh as root or: sudo enforce_postgres_shm_size"
+      fi
+    fi
+  fi
+
   # Query status in env format and parse required values
   STATUS_ENV=$(npx -y supabase@${SUPABASE_VERSION:-2.70.5} status -o env) || { err "Failed to get Supabase status"; exit 1; }
   SERVICE_ROLE_KEY=$(echo "$STATUS_ENV" | awk -F'=' '/^SERVICE_ROLE_KEY/{gsub(/"/,"",$2); print $2}')
@@ -301,6 +366,13 @@ else
 fi
 SUPABASE_SERVICE_KEY_VAL="$(grep -E '^SUPABASE_SERVICE_KEY=' "$ENV_FILE" | sed 's/^SUPABASE_SERVICE_KEY=//')"
 upsert_src_env SUPABASE_SERVICE_KEY "$SUPABASE_SERVICE_KEY_VAL"
+
+# Sync CREDENTIAL_ENCRYPTION_KEY to archon-src/.env for container use
+CRED_KEY_VAL="$(grep -E '^CREDENTIAL_ENCRYPTION_KEY=' "$ENV_FILE" | sed 's/^CREDENTIAL_ENCRYPTION_KEY=//')"
+if [[ -n "$CRED_KEY_VAL" ]]; then
+  upsert_src_env CREDENTIAL_ENCRYPTION_KEY "$CRED_KEY_VAL"
+fi
+
 upsert_src_env HOST "$(grep -E '^HOST=' "$ENV_FILE" | sed 's/^HOST=//')"
 upsert_src_env ARCHON_SERVER_PORT "$(grep -E '^ARCHON_SERVER_PORT=' "$ENV_FILE" | sed 's/^ARCHON_SERVER_PORT=//')"
 upsert_src_env ARCHON_MCP_PORT "$(grep -E '^ARCHON_MCP_PORT=' "$ENV_FILE" | sed 's/^ARCHON_MCP_PORT=//')"
@@ -366,15 +438,6 @@ if [[ $run_migrations -eq 1 ]]; then
   if [[ -n "$SUPABASE_KONG" ]]; then
     wait_for_supabase_table "$SUPABASE_KONG" "archon_settings" "$SUPABASE_SERVICE_KEY_VAL"
   fi
-
-  # Cleanup stale encrypted credentials that can't be decrypted with current key
-  # (Happens when SUPABASE_SERVICE_KEY changes, e.g., fresh Supabase init)
-  docker run --rm --network supabase_network_supabase \
-    -e DB_HOST="$DB_HOST" -e DB_PORT="$DB_PORT" -e DB_USER="$DB_USER" -e DB_PASSWORD="$DB_PASSWORD" -e DB_NAME="$DB_NAME" \
-    -e SUPABASE_SERVICE_KEY="$SUPABASE_SERVICE_KEY_VAL" \
-    -e PIP_ROOT_USER_ACTION=ignore -e PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    -v "$ROOT_DIR":/work -w /work \
-    python:3.12-slim bash -lc "pip install -q psycopg2-binary cryptography && python migration/cleanup_stale_credentials.py"
 fi
 
 # OpenObserve compose file location (lives in aeo-archon, not archon-src)

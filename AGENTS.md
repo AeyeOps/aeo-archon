@@ -18,6 +18,27 @@ aeo-archon (this repo)           # Wrapper with operational tooling
                       └── syncs with → coleam00/archon  # Upstream
 ```
 
+### Single Entry Point Design
+
+`bootstrap-archon.sh` is the **sole entry point** for spinning up the stack. It calls `archon-up.sh` internally.
+
+- DO NOT suggest running `archon-up.sh` after bootstrap - it already ran
+- Bootstrap is idempotent: safe to re-run anytime
+- All setup flows through: `bootstrap-archon.sh` → `archon-up.sh`
+
+### Fork Maintenance Warning
+
+Branch `fix/docker-deployment-improvements` carries critical bug fixes NOT merged upstream.
+
+**DO NOT:**
+- Suggest rebasing onto upstream/main
+- Suggest switching to main branch for "latest features"
+- Cherry-pick from upstream without careful review
+
+**WHY:** PRs submitted to coleam00/archon are not being merged. Rebasing would lose our fixes.
+
+The fork sync (`scripts/sync-main.sh`) only syncs the `main` branch, not the working branch.
+
 Key insight: This repo does NOT contain application code. It provides:
 - Bootstrap scripts that set up the environment
 - Migration tooling that syncs and applies database changes
@@ -34,7 +55,7 @@ Key insight: This repo does NOT contain application code. It provides:
 ├── restart-archon-services.sh   # Service restart utility
 ├── test-archon.sh               # E2E test runner
 ├── lib/
-│   ├── supabase-recovery.sh     # Shared recovery functions
+│   ├── supabase-utils.sh        # Supabase lifecycle and utility functions
 │   └── e2e-tests.sh             # Test suite library
 ├── migration/
 │   ├── run_migrations.py        # Idempotent migration runner
@@ -59,7 +80,7 @@ Key insight: This repo does NOT contain application code. It provides:
 |------|---------|
 | `archon-up.sh` | Main orchestrator: starts Supabase, runs migrations, launches Archon |
 | `bootstrap-archon.sh` | First-time setup: installs prerequisites, clones repo, configures env |
-| `lib/supabase-recovery.sh` | Functions for storage migration recovery and container cleanup |
+| `lib/supabase-utils.sh` | Supabase lifecycle management, health checks, port config, and recovery |
 | `lib/e2e-tests.sh` | 19 automated tests for database, storage, API, and observability |
 | `migration/run_migrations.py` | Applies SQL migrations idempotently via tracking table |
 | `.env` | Configuration (ports, Supabase keys, feature flags) |
@@ -307,17 +328,18 @@ All scripts are designed to be re-runnable:
 
 ### Version Pinning
 ```bash
-SUPABASE_VERSION=2.70.5  # In .env and lib/supabase-recovery.sh
+SUPABASE_VERSION=2.70.5  # In .env and lib/supabase-utils.sh
 ```
 Never use `@latest` for Supabase CLI in scripts.
 
-### Recovery Functions
-Source `lib/supabase-recovery.sh` to access:
+### Utility Functions
+Source `lib/supabase-utils.sh` to access:
 - `cleanup_stale_containers()` - Remove orphaned containers
 - `recover_storage_migrations()` - Reset migration tracking
 - `check_storage_health()` - Verify storage container
 - `preflight_checks()` - Validate prerequisites
 - `auto_backup()` - Create database backup
+- `enforce_postgres_shm_size()` - Set Postgres container shm_size to 4GB (requires root)
 
 ### Container Naming
 Supabase containers follow the pattern: `supabase_<service>_supabase`

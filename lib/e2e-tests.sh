@@ -22,6 +22,11 @@ if [[ -f "$ROOT_DIR/.env" ]]; then
   set +a
 fi
 
+# Source Supabase utility functions (port configuration, health checks, etc.)
+if [[ -f "$ROOT_DIR/lib/supabase-utils.sh" ]]; then
+  source "$ROOT_DIR/lib/supabase-utils.sh"
+fi
+
 # Test Category 1: Database Health
 test_database_health(){
   local failures=0
@@ -169,7 +174,7 @@ test_supabase_api(){
   echo "==> Testing Supabase API"
 
   # Test 1: Kong gateway responding
-  local status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://localhost:54321" 2>/dev/null)
+  local status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://localhost:$SUPABASE_PORT_API" 2>/dev/null)
   if [[ "$status" != "000" ]]; then
     ok "Supabase gateway responding (HTTP $status)"
   else
@@ -180,7 +185,7 @@ test_supabase_api(){
   if [[ -n "${SUPABASE_SERVICE_KEY:-}" ]]; then
     status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
       -H "apikey: $SUPABASE_SERVICE_KEY" \
-      "http://localhost:54321/rest/v1/archon_settings?select=*&limit=1" 2>/dev/null)
+      "http://localhost:$SUPABASE_PORT_API/rest/v1/archon_settings?select=*&limit=1" 2>/dev/null)
     if [[ "$status" == "200" ]]; then
       ok "Supabase REST API accessible"
     else

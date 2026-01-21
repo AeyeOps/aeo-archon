@@ -34,9 +34,9 @@ err(){ echo -e "${RED}✗${NC} $1"; }
 # Configuration
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Source shared recovery functions if available
-if [[ -f "$ROOT_DIR/lib/supabase-recovery.sh" ]]; then
-  source "$ROOT_DIR/lib/supabase-recovery.sh"
+# Source shared Supabase utility functions if available
+if [[ -f "$ROOT_DIR/lib/supabase-utils.sh" ]]; then
+  source "$ROOT_DIR/lib/supabase-utils.sh"
 fi
 
 # Source state file if it exists (for ARCHON_REPO_URL, ARCHON_BRANCH, etc.)
@@ -45,7 +45,7 @@ if [[ -f "$ROOT_DIR/.archon-state" ]]; then
 fi
 
 # Version pinning (inherit from recovery lib or set default)
-SUPABASE_VERSION="${SUPABASE_VERSION:-2.70.5}"
+SUPABASE_VERSION="${SUPABASE_VERSION:-2.72.7}"
 
 # Repo URL must be explicitly set in .archon-state or environment - no fallback
 # When ready to switch to upstream: set ARCHON_REPO_URL=https://github.com/coleam00/archon.git
@@ -62,6 +62,8 @@ NODE_VERSION_REQUIRED="${NODE_VERSION_REQUIRED:-lts/*}"
 DO_START=1
 FRESH_INSTALL=0
 CLEAN_IMAGES=0
+NO_PORT_CHECK=0
+STOP_ONLY=0
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -70,11 +72,13 @@ while [[ $# -gt 0 ]]; do
     --branch) ARCHON_BRANCH="${2:-}"; shift 2;;
     --dir) ARCHON_SRC_DIR="${2:-}"; shift 2;;
     --no-start) DO_START=0; shift;;
+    --stop) DO_START=0; STOP_ONLY=1; shift;;
     --fresh) FRESH_INSTALL=1; shift;;
     --clean-images) CLEAN_IMAGES=1; shift;;
+    --no-port-check) NO_PORT_CHECK=1; shift;;
     -h|--help)
       cat <<EOF
-Usage: $(basename "$0") [--repo <url>] [--branch <name>] [--dir <path>] [--no-start] [--fresh] [--clean-images]
+Usage: $(basename "$0") [--repo <url>] [--branch <name>] [--dir <path>] [--no-start] [--stop] [--fresh] [--clean-images] [--no-port-check]
 
 Bootstrap Archon by installing system prerequisites, cloning/updating repository, and launching.
 
@@ -83,8 +87,10 @@ Options:
   --branch <name> Git branch name (default: main)
   --dir <path>    Installation directory (default: /opt/aeo/archon-src)
   --no-start      Skip launching after bootstrap
+  --stop          Stop services and exit (no restart)
   --fresh         Perform fresh database install (wipe and reinstall schema)
   --clean-images  Remove old Supabase Docker images (useful when upgrading CLI version)
+  --no-port-check Skip port binding verification (for debugging)
   -h, --help      Show this help message
 
 Environment Variables:
@@ -92,7 +98,7 @@ Environment Variables:
   ARCHON_BRANCH             Override default branch
   ARCHON_SRC_DIR_OVERRIDE   Override default installation directory
   NODE_VERSION_REQUIRED     Override Node.js version (default: lts/*)
-  SUPABASE_VERSION          Override Supabase CLI version (default: 2.70.5)
+  SUPABASE_VERSION          Override Supabase CLI version (default: 2.72.7)
 EOF
       exit 0;;
     *) err "Unknown option: $1"; exit 1;;
@@ -137,7 +143,7 @@ if [[ $need_update -eq 1 ]]; then
 fi
 
 # Install basic packages
-basic_packages=(curl ca-certificates gnupg lsb-release git)
+basic_packages=(curl ca-certificates gnupg lsb-release git jq)
 missing_basic=()
 for pkg in "${basic_packages[@]}"; do
   if ! dpkg -s "$pkg" >/dev/null 2>&1; then
@@ -170,6 +176,10 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 docker info >/dev/null 2>&1 && ok "Docker daemon active" || { err "Docker daemon not running"; exit 1; }
+
+# Note: Postgres shm_size is enforced post-provisioning via enforce_postgres_shm_size()
+# in lib/supabase-utils.sh, called from archon-up.sh after supabase start completes.
+# Setting Docker daemon defaults doesn't work because Supabase CLI ignores them.
 
 # Install docker compose plugin
 if ! docker compose version >/dev/null 2>&1; then
@@ -219,13 +229,13 @@ ok "npx supabase@$SUPABASE_VERSION available"
 echo ""
 echo "==> Phase 1.5: Stopping running services"
 
-if [[ -x "$ROOT_DIR/stop-archon.sh" ]]; then
-  # Run as CURRENT_USER so NVM/npx is available for Supabase CLI
-  # Export ARCHON_SRC_DIR so stop script uses correct path
-  # Use --force to ensure all stale containers are cleaned up
-  su - "$CURRENT_USER" -c "export ARCHON_SRC_DIR_OVERRIDE='$ARCHON_SRC_DIR'; export SUPABASE_VERSION='$SUPABASE_VERSION'; cd '$ROOT_DIR' && bash ./stop-archon.sh --force"
-else
-  warn "stop-archon.sh not found; skipping service shutdown"
+# Use stop_all_services from lib/supabase-utils.sh
+su - "$CURRENT_USER" -c "source '$ROOT_DIR/lib/supabase-utils.sh' && stop_all_services '$ARCHON_SRC_DIR' '$ROOT_DIR/supabase'"
+
+# Exit early if --stop flag was passed
+if [[ $STOP_ONLY -eq 1 ]]; then
+  ok "Services stopped. Exiting (--stop flag)."
+  exit 0
 fi
 
 # Clean old Supabase images if requested (prevents version drift issues)
@@ -370,7 +380,7 @@ if [[ ! -f "$REPO_ENV" ]]; then
 fi
 
 # Ensure launcher scripts are executable
-chmod +x "$ROOT_DIR/archon-up.sh" "$ROOT_DIR/stop-archon.sh" "$ROOT_DIR/restart-archon-services.sh" 2>/dev/null || true
+chmod +x "$ROOT_DIR/archon-up.sh" 2>/dev/null || true
 
 # Restore user ownership after root git operations
 if [[ "$CURRENT_USER" != "root" ]]; then
@@ -385,7 +395,8 @@ if [[ $DO_START -eq 1 ]]; then
   echo ""
   echo "==> Phase 3: Starting Archon stack"
   ARCHON_UP_ARGS=""
-  [[ $FRESH_INSTALL -eq 1 ]] && ARCHON_UP_ARGS="--fresh"
+  [[ $FRESH_INSTALL -eq 1 ]] && ARCHON_UP_ARGS="$ARCHON_UP_ARGS --fresh"
+  [[ $NO_PORT_CHECK -eq 1 ]] && ARCHON_UP_ARGS="$ARCHON_UP_ARGS --no-port-check"
   su - "$CURRENT_USER" -c "export ARCHON_SRC_DIR_OVERRIDE='$ARCHON_SRC_DIR'; cd '$ROOT_DIR' && bash ./archon-up.sh $ARCHON_UP_ARGS"
 else
   echo ""

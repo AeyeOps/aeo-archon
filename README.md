@@ -62,7 +62,7 @@ aeo-archon/                     # This wrapper repository
 ├── archon-up.sh                # Service launcher with health checks
 ├── stop-archon.sh              # Clean shutdown with container cleanup
 ├── lib/
-│   ├── supabase-recovery.sh    # Automatic storage migration recovery
+│   ├── supabase-utils.sh       # Supabase lifecycle, health checks, and utilities
 │   └── e2e-tests.sh            # Comprehensive validation suite
 ├── migration/
 │   └── run_migrations.py       # Idempotent migration runner

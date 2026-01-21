@@ -6,14 +6,15 @@ Reads API keys from environment and inserts/updates them in the database
 using the same encryption as credential_service.py.
 
 Usage:
-    OPENAI_API_KEY=sk-xxx SUPABASE_SERVICE_KEY=xxx python inject-api-keys.py
+    OPENAI_API_KEY=sk-xxx CREDENTIAL_ENCRYPTION_KEY=xxx python inject-api-keys.py
 
 Environment variables for keys (all optional):
     OPENAI_API_KEY, GEMINI_API_KEY, GROK_API_KEY, GITHUB_TOKEN,
     ANTHROPIC_API_KEY, OPENROUTER_API_KEY
 
-Required:
-    SUPABASE_SERVICE_KEY - Used to derive encryption key
+Required (one of):
+    CREDENTIAL_ENCRYPTION_KEY - Stable Fernet key (preferred)
+    SUPABASE_SERVICE_KEY - Legacy fallback (volatile across restarts)
     DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME - Database connection
 """
 
@@ -48,10 +49,18 @@ API_KEYS = [
 
 
 def get_encryption_key() -> bytes:
-    """Generate encryption key from SUPABASE_SERVICE_KEY - mirrors credential_service.py"""
+    """Generate encryption key - mirrors credential_service.py"""
+    # Check for stable dedicated encryption key first (recommended)
+    stable_key = os.getenv("CREDENTIAL_ENCRYPTION_KEY")
+    if stable_key:
+        # Fernet keys are already valid base64-encoded 32-byte keys
+        return stable_key.encode()
+
+    # Fall back to SUPABASE_SERVICE_KEY derivation (legacy - volatile!)
+    print("! Warning: CREDENTIAL_ENCRYPTION_KEY not set, using legacy SUPABASE_SERVICE_KEY")
     service_key = os.getenv("SUPABASE_SERVICE_KEY")
     if not service_key:
-        raise ValueError("SUPABASE_SERVICE_KEY environment variable required")
+        raise ValueError("CREDENTIAL_ENCRYPTION_KEY or SUPABASE_SERVICE_KEY required")
 
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),

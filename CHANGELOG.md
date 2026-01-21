@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.7.0] - 2025-12-27
 
 ### Added
-- Supabase recovery library (`lib/supabase-recovery.sh`) with automatic storage migration recovery
+- Supabase utility library (`lib/supabase-utils.sh`) with lifecycle management and automatic storage migration recovery
 - E2E validation test suite (`lib/e2e-tests.sh`) with 19 automated tests across 5 categories
 - Standalone test runner (`test-archon.sh`)
 - Version pinning for Supabase CLI (2.70.5) to prevent migration drift

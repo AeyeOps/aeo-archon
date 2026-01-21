@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Supabase recovery and cleanup functions
+# Supabase utility functions for lifecycle management, health checks, and configuration
 # Source this file from other scripts for shared functionality
 
 # Auto-detect ROOT_DIR if not set
@@ -18,8 +18,30 @@ err(){ echo -e "${RED}x${NC} $1"; }
 # Version configuration
 # Pin to a known-good version. Update when Archon upstream is tested with newer CLI.
 # Check https://github.com/supabase/cli/releases for changelog
-# Last verified: 2025-12-27 with Archon commit $(git -C /opt/aeo/archon-src rev-parse --short HEAD 2>/dev/null || echo 'unknown')
-SUPABASE_VERSION="${SUPABASE_VERSION:-2.70.5}"
+# Last verified: 2026-01-16 with Archon commit $(git -C /opt/aeo/archon-src rev-parse --short HEAD 2>/dev/null || echo 'unknown')
+SUPABASE_VERSION="${SUPABASE_VERSION:-2.72.7}"
+
+# Parse port from TOML section
+# Usage: get_toml_port "config.toml" "api"
+get_toml_port(){
+  local config_file="$1" section="$2"
+  [[ -f "$config_file" ]] || return 1
+  awk -v section="$section" '
+    /^\[/ { in_section = 0 }
+    $0 ~ "^\\[" section "\\]" { in_section = 1; next }
+    in_section && /^port[[:space:]]*=/ { gsub(/[^0-9]/, ""); print; exit }
+  ' "$config_file"
+}
+
+# Load Supabase ports from config.toml with fallbacks
+load_supabase_ports(){
+  local config="${SUPABASE_CONFIG:-$ROOT_DIR/supabase/supabase/config.toml}"
+  SUPABASE_PORT_API=$(get_toml_port "$config" api) || SUPABASE_PORT_API=54321
+  SUPABASE_PORT_DB=$(get_toml_port "$config" db) || SUPABASE_PORT_DB=54322
+  SUPABASE_PORT_STUDIO=$(get_toml_port "$config" studio) || SUPABASE_PORT_STUDIO=54323
+  SUPABASE_PORT_INBUCKET=$(get_toml_port "$config" inbucket) || SUPABASE_PORT_INBUCKET=54324
+  SUPABASE_PORT_ANALYTICS=$(get_toml_port "$config" analytics) || SUPABASE_PORT_ANALYTICS=54327
+}
 
 # Version lock file for tracking what version was used successfully
 VERSION_LOCK_FILE="${ROOT_DIR:-.}/.supabase-version-lock"
@@ -65,12 +87,98 @@ SUPABASE_CONTAINERS=(
   supabase_mailpit_supabase
 )
 
+# Build port verification array from config.toml
+# Internal ports are fixed by Supabase docker images
+build_expected_ports(){
+  load_supabase_ports
+  SUPABASE_EXPECTED_PORTS=(
+    "${SUPABASE_PORT_API}:8000:supabase_kong_supabase"
+    "${SUPABASE_PORT_DB}:5432:supabase_db_supabase"
+    "${SUPABASE_PORT_STUDIO}:3000:supabase_studio_supabase"
+    "${SUPABASE_PORT_INBUCKET}:8025:supabase_inbucket_supabase"
+    "${SUPABASE_PORT_ANALYTICS}:4000:supabase_analytics_supabase"
+  )
+}
+
+# Initialize on source (replaces old hardcoded array)
+build_expected_ports
+
+# Verify ALL Supabase ports are properly bound to host
+# Returns 0 if all ports bound, 1 if any missing
+# This detects when containers were restarted by Docker (not Supabase CLI)
+# which causes port bindings to be lost
+verify_supabase_port_bindings(){
+  local failures=0
+  local checked=0
+
+  for spec in "${SUPABASE_EXPECTED_PORTS[@]}"; do
+    local host_port="${spec%%:*}"
+    local rest="${spec#*:}"
+    local container_port="${rest%%:*}"
+    local container_name="${rest#*:}"
+
+    # Handle mailpit/inbucket naming variation
+    local actual_container="$container_name"
+    if [[ "$container_name" == "supabase_inbucket_supabase" ]]; then
+      # Check both possible names
+      if docker ps --format '{{.Names}}' | grep -q "^supabase_mailpit_supabase$"; then
+        actual_container="supabase_mailpit_supabase"
+      fi
+    fi
+
+    # Skip if container doesn't exist (optional services)
+    if ! docker ps --format '{{.Names}}' | grep -q "^${actual_container}$"; then
+      continue
+    fi
+
+    ((checked++))
+    local bound=$(docker port "$actual_container" "$container_port" 2>/dev/null)
+
+    if [[ -z "$bound" ]]; then
+      err "Port binding missing: $actual_container:$container_port (expected host:$host_port)"
+      ((failures++))
+    elif [[ "$bound" != *":$host_port" ]]; then
+      warn "Port mismatch: $actual_container bound to $bound (expected :$host_port)"
+      ((failures++))
+    fi
+  done
+
+  if [[ $failures -gt 0 ]]; then
+    err "$failures of $checked port bindings missing or incorrect"
+    warn "Containers may have been restarted by Docker outside of Supabase CLI"
+    return 1
+  fi
+
+  if [[ $checked -gt 0 ]]; then
+    ok "All $checked Supabase port bindings verified"
+  fi
+  return 0
+}
+
 # Force cleanup of all supabase containers
 cleanup_stale_containers(){
   echo "Cleaning up stale Supabase containers..."
   # Force remove any supabase containers regardless of state
   docker ps -a --format '{{.Names}}' | grep -E '^supabase_' | xargs -r docker rm -f 2>/dev/null || true
   ok "Stale containers cleaned"
+}
+
+# Stop all Archon and Supabase services
+stop_all_services(){
+  local archon_dir="${1:-${ARCHON_SRC_DIR:-$ROOT_DIR/archon-src}}"
+  local supabase_dir="${2:-$ROOT_DIR/supabase}"
+
+  echo "Stopping running services..."
+  # Stop archon-src containers
+  if [[ -f "$archon_dir/docker-compose.yml" ]]; then
+    ( cd "$archon_dir" && docker compose --profile agents --profile work-orders down --remove-orphans 2>/dev/null ) && ok "Archon containers stopped" || true
+  fi
+  # Stop Supabase via CLI
+  if [[ -d "$supabase_dir" ]] && command -v npx >/dev/null 2>&1; then
+    ( cd "$supabase_dir" && npx -y supabase@${SUPABASE_VERSION} stop 2>/dev/null ) && ok "Supabase stopped" || true
+  fi
+  # Force cleanup stale containers
+  cleanup_stale_containers
 }
 
 # Clean old supabase images to prevent version drift
@@ -227,7 +335,7 @@ preflight_checks(){
   fi
 
   # Check for port conflicts (Supabase ports)
-  local ports=(54321 54322 54323 54324)
+  local ports=($SUPABASE_PORT_API $SUPABASE_PORT_DB $SUPABASE_PORT_STUDIO $SUPABASE_PORT_INBUCKET $SUPABASE_PORT_ANALYTICS)
   for port in "${ports[@]}"; do
     if command -v nc >/dev/null 2>&1; then
       if nc -z localhost "$port" 2>/dev/null; then
@@ -253,4 +361,86 @@ preflight_checks(){
   fi
 
   return $failures
+}
+
+# Enforce shm_size on Postgres container after Supabase provisions it
+# Supabase CLI ignores Docker daemon defaults, so we must modify post-creation
+# Uses hostconfig.json edit which persists across container restarts (not recreates)
+enforce_postgres_shm_size(){
+  local container_name="${1:-supabase_db_supabase}"
+  local desired_shm_bytes="${2:-4294967296}"  # 4GB default
+  local desired_shm_human="4GB"
+
+  # Check if container exists
+  if ! docker ps -a --format '{{.Names}}' | grep -q "^${container_name}$"; then
+    warn "Container $container_name not found, skipping shm_size enforcement"
+    return 0
+  fi
+
+  # Get current shm_size
+  local current_shm
+  current_shm=$(docker inspect -f '{{.HostConfig.ShmSize}}' "$container_name" 2>/dev/null || echo "0")
+
+  if [[ "$current_shm" -ge "$desired_shm_bytes" ]]; then
+    ok "Postgres shm_size already adequate: $(numfmt --to=iec $current_shm 2>/dev/null || echo "${current_shm} bytes")"
+    return 0
+  fi
+
+  echo "Enforcing shm_size=$desired_shm_human on $container_name (current: $(numfmt --to=iec $current_shm 2>/dev/null || echo "${current_shm} bytes"))..."
+
+  # Get container ID
+  local container_id
+  container_id=$(docker inspect -f '{{.Id}}' "$container_name" 2>/dev/null)
+  if [[ -z "$container_id" ]]; then
+    err "Failed to get container ID for $container_name"
+    return 1
+  fi
+
+  local host_config="/var/lib/docker/containers/${container_id}/hostconfig.json"
+
+  # Check if we have access (need root)
+  if [[ ! -w "$host_config" ]] && [[ $EUID -ne 0 ]]; then
+    warn "Cannot modify hostconfig.json without root privileges"
+    warn "Run with sudo or use: docker exec -u root $container_name mount -o remount,size=4g /dev/shm"
+    return 1
+  fi
+
+  # Stop the container first
+  echo "Stopping $container_name..."
+  docker stop "$container_name" >/dev/null 2>&1 || true
+
+  # Update hostconfig.json
+  if [[ -f "$host_config" ]]; then
+    # Backup
+    cp "$host_config" "${host_config}.backup" 2>/dev/null || true
+
+    # Update ShmSize using sed (jq may not be available)
+    if sed -i "s/\"ShmSize\":[0-9]*/\"ShmSize\":${desired_shm_bytes}/" "$host_config" 2>/dev/null; then
+      ok "Updated hostconfig.json with ShmSize=${desired_shm_bytes}"
+    else
+      err "Failed to update hostconfig.json"
+      docker start "$container_name" >/dev/null 2>&1 || true
+      return 1
+    fi
+  else
+    err "hostconfig.json not found at $host_config"
+    docker start "$container_name" >/dev/null 2>&1 || true
+    return 1
+  fi
+
+  # Restart the container
+  echo "Starting $container_name with new shm_size..."
+  docker start "$container_name" >/dev/null 2>&1
+
+  # Verify
+  sleep 2
+  local new_shm
+  new_shm=$(docker inspect -f '{{.HostConfig.ShmSize}}' "$container_name" 2>/dev/null || echo "0")
+  if [[ "$new_shm" -ge "$desired_shm_bytes" ]]; then
+    ok "Postgres shm_size enforced: $(numfmt --to=iec $new_shm 2>/dev/null || echo "${new_shm} bytes")"
+    return 0
+  else
+    err "shm_size enforcement failed (got: $new_shm, expected: $desired_shm_bytes)"
+    return 1
+  fi
 }

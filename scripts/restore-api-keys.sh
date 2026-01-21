@@ -13,10 +13,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/.env" 2>/dev/null || true
 
-# Get SUPABASE_SERVICE_KEY
+# Get encryption key (prefer stable key, fall back to service key)
+CREDENTIAL_ENCRYPTION_KEY_VAL="${CREDENTIAL_ENCRYPTION_KEY:-}"
 SUPABASE_SERVICE_KEY_VAL="${SUPABASE_SERVICE_KEY:-}"
-if [[ -z "$SUPABASE_SERVICE_KEY_VAL" ]]; then
-  echo "✗ SUPABASE_SERVICE_KEY not set"
+
+if [[ -z "$CREDENTIAL_ENCRYPTION_KEY_VAL" && -z "$SUPABASE_SERVICE_KEY_VAL" ]]; then
+  echo "CREDENTIAL_ENCRYPTION_KEY or SUPABASE_SERVICE_KEY required"
   exit 1
 fi
 
@@ -35,6 +37,7 @@ docker run --rm --network supabase_network_supabase \
   -e DB_USER="$DB_USER" \
   -e DB_PASSWORD="$DB_PASSWORD" \
   -e DB_NAME="$DB_NAME" \
+  -e CREDENTIAL_ENCRYPTION_KEY="$CREDENTIAL_ENCRYPTION_KEY_VAL" \
   -e SUPABASE_SERVICE_KEY="$SUPABASE_SERVICE_KEY_VAL" \
   -e OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
   -e GEMINI_API_KEY="${GEMINI_API_KEY:-}" \

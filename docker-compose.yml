@@ -121,32 +121,7 @@ services:
       timeout: 10s
       retries: 5
 
-  openobserve:
-    profiles:
-      - observability
-    image: public.ecr.aws/zinclabs/openobserve:latest
-    container_name: openobserve
-    ports:
-      - "5080:5080"
-    environment:
-      - ZO_ROOT_USER_EMAIL=admin@archon.local
-      - ZO_ROOT_USER_PASSWORD=archon-admin
-      - ZO_DATA_DIR=/data
-    volumes:
-      - openobserve-data:/data
-    networks:
-      - app-network
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:5080/"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 20s
-
 networks:
   app-network:
     driver: bridge
 
-volumes:
-  openobserve-data:
-    driver: local

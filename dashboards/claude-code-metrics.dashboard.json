@@ -1,0 +1,339 @@
+{
+  "version": 5,
+  "dashboardId": "",
+  "title": "Claude Code Metrics",
+  "description": "Telemetry dashboard for Claude Code sessions, token usage, costs, and productivity metrics",
+  "role": "",
+  "owner": "",
+  "created": "",
+  "tabs": [
+    {
+      "tabId": "overview",
+      "name": "Overview",
+      "panels": [
+        {
+          "id": "Panel_TokenUsage",
+          "type": "line",
+          "title": "Token Usage Over Time",
+          "description": "Input and output tokens consumed by Claude Code",
+          "config": {
+            "show_legends": true,
+            "legends_position": "bottom",
+            "unit": "none",
+            "decimals": 0,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": true,
+            "label_option": {"rotate": 0},
+            "show_symbol": true,
+            "line_interpolation": "smooth",
+            "legend_width": {"unit": "px"},
+            "base_map": {"type": "osm"},
+            "map_type": {"type": "world"},
+            "map_view": {"zoom": 1, "lat": 0, "lng": 0},
+            "map_symbol_style": {"size": "by Value", "size_by_value": {"min": 1, "max": 100}, "size_fixed": 2},
+            "drilldown": [],
+            "mark_line": [],
+            "override_config": [],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {"mode": "palette-classic", "fixedColor": [], "seriesBy": "last"},
+            "trellis": {"layout": null, "num_of_columns": 1}
+          },
+          "queryType": "promql",
+          "queries": [
+            {
+              "query": "claude_code_token_usage{}",
+              "vrlFunctionQuery": "",
+              "customQuery": true,
+              "fields": {
+                "stream": "claude_code_token_usage",
+                "stream_type": "metrics",
+                "x": [],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}
+              },
+              "config": {
+                "promql_legend": "{{token_type}}",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {"x": 0, "y": 0, "w": 48, "h": 9, "i": 1, "moved": false},
+          "htmlContent": "",
+          "markdownContent": "",
+          "customChartContent": ""
+        },
+        {
+          "id": "Panel_CostUsage",
+          "type": "line",
+          "title": "Cost Usage (USD)",
+          "description": "Estimated API cost in USD",
+          "config": {
+            "show_legends": true,
+            "legends_position": "bottom",
+            "unit": "currency",
+            "decimals": 4,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": true,
+            "label_option": {"rotate": 0},
+            "show_symbol": true,
+            "line_interpolation": "smooth",
+            "legend_width": {"unit": "px"},
+            "base_map": {"type": "osm"},
+            "map_type": {"type": "world"},
+            "map_view": {"zoom": 1, "lat": 0, "lng": 0},
+            "map_symbol_style": {"size": "by Value", "size_by_value": {"min": 1, "max": 100}, "size_fixed": 2},
+            "drilldown": [],
+            "mark_line": [],
+            "override_config": [],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {"mode": "palette-classic", "fixedColor": ["#2ecc71"], "seriesBy": "last"},
+            "trellis": {"layout": null, "num_of_columns": 1}
+          },
+          "queryType": "promql",
+          "queries": [
+            {
+              "query": "claude_code_cost_usage{}",
+              "vrlFunctionQuery": "",
+              "customQuery": true,
+              "fields": {
+                "stream": "claude_code_cost_usage",
+                "stream_type": "metrics",
+                "x": [],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}
+              },
+              "config": {
+                "promql_legend": "cost",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {"x": 0, "y": 9, "w": 24, "h": 9, "i": 2, "moved": false},
+          "htmlContent": "",
+          "markdownContent": "",
+          "customChartContent": ""
+        },
+        {
+          "id": "Panel_ActiveTime",
+          "type": "line",
+          "title": "Active Time (seconds)",
+          "description": "Total active coding time",
+          "config": {
+            "show_legends": true,
+            "legends_position": "bottom",
+            "unit": "seconds",
+            "decimals": 0,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": true,
+            "label_option": {"rotate": 0},
+            "show_symbol": true,
+            "line_interpolation": "smooth",
+            "legend_width": {"unit": "px"},
+            "base_map": {"type": "osm"},
+            "map_type": {"type": "world"},
+            "map_view": {"zoom": 1, "lat": 0, "lng": 0},
+            "map_symbol_style": {"size": "by Value", "size_by_value": {"min": 1, "max": 100}, "size_fixed": 2},
+            "drilldown": [],
+            "mark_line": [],
+            "override_config": [],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {"mode": "palette-classic", "fixedColor": ["#3498db"], "seriesBy": "last"},
+            "trellis": {"layout": null, "num_of_columns": 1}
+          },
+          "queryType": "promql",
+          "queries": [
+            {
+              "query": "claude_code_active_time_total{}",
+              "vrlFunctionQuery": "",
+              "customQuery": true,
+              "fields": {
+                "stream": "claude_code_active_time_total",
+                "stream_type": "metrics",
+                "x": [],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}
+              },
+              "config": {
+                "promql_legend": "active_time",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {"x": 24, "y": 9, "w": 24, "h": 9, "i": 3, "moved": false},
+          "htmlContent": "",
+          "markdownContent": "",
+          "customChartContent": ""
+        },
+        {
+          "id": "Panel_LinesOfCode",
+          "type": "line",
+          "title": "Lines of Code",
+          "description": "Lines added/edited",
+          "config": {
+            "show_legends": true,
+            "legends_position": "bottom",
+            "unit": "none",
+            "decimals": 0,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": true,
+            "label_option": {"rotate": 0},
+            "show_symbol": true,
+            "line_interpolation": "smooth",
+            "legend_width": {"unit": "px"},
+            "base_map": {"type": "osm"},
+            "map_type": {"type": "world"},
+            "map_view": {"zoom": 1, "lat": 0, "lng": 0},
+            "map_symbol_style": {"size": "by Value", "size_by_value": {"min": 1, "max": 100}, "size_fixed": 2},
+            "drilldown": [],
+            "mark_line": [],
+            "override_config": [],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {"mode": "palette-classic", "fixedColor": ["#f39c12"], "seriesBy": "last"},
+            "trellis": {"layout": null, "num_of_columns": 1}
+          },
+          "queryType": "promql",
+          "queries": [
+            {
+              "query": "claude_code_lines_of_code_count{}",
+              "vrlFunctionQuery": "",
+              "customQuery": true,
+              "fields": {
+                "stream": "claude_code_lines_of_code_count",
+                "stream_type": "metrics",
+                "x": [],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}
+              },
+              "config": {
+                "promql_legend": "lines",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {"x": 0, "y": 18, "w": 24, "h": 9, "i": 4, "moved": false},
+          "htmlContent": "",
+          "markdownContent": "",
+          "customChartContent": ""
+        },
+        {
+          "id": "Panel_EditDecisions",
+          "type": "line",
+          "title": "Edit Tool Decisions",
+          "description": "Code edit tool decisions",
+          "config": {
+            "show_legends": true,
+            "legends_position": "bottom",
+            "unit": "none",
+            "decimals": 0,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": true,
+            "label_option": {"rotate": 0},
+            "show_symbol": true,
+            "line_interpolation": "smooth",
+            "legend_width": {"unit": "px"},
+            "base_map": {"type": "osm"},
+            "map_type": {"type": "world"},
+            "map_view": {"zoom": 1, "lat": 0, "lng": 0},
+            "map_symbol_style": {"size": "by Value", "size_by_value": {"min": 1, "max": 100}, "size_fixed": 2},
+            "drilldown": [],
+            "mark_line": [],
+            "override_config": [],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {"mode": "palette-classic", "fixedColor": ["#9b59b6"], "seriesBy": "last"},
+            "trellis": {"layout": null, "num_of_columns": 1}
+          },
+          "queryType": "promql",
+          "queries": [
+            {
+              "query": "claude_code_code_edit_tool_decision{}",
+              "vrlFunctionQuery": "",
+              "customQuery": true,
+              "fields": {
+                "stream": "claude_code_code_edit_tool_decision",
+                "stream_type": "metrics",
+                "x": [],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}
+              },
+              "config": {
+                "promql_legend": "decisions",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {"x": 24, "y": 18, "w": 24, "h": 9, "i": 5, "moved": false},
+          "htmlContent": "",
+          "markdownContent": "",
+          "customChartContent": ""
+        }
+      ]
+    }
+  ],
+  "variables": {"list": [], "showDynamicFilters": true},
+  "defaultDatetimeDuration": {"type": "relative", "relativeTimePeriod": "6h"}
+}

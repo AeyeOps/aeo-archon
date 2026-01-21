@@ -1,0 +1,5 @@
+# Supabase CLI version lock - auto-generated
+# Last successful start: 2026-01-21T00:24:56-05:00
+SUPABASE_CLI_VERSION=2.72.7
+ARCHON_COMMIT=d815c7b
+STORAGE_MIGRATIONS=50
