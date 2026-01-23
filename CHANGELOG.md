@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-01-23
+
+### Added
+- `scripts/add-nopasswd-log.sh` helper for safe log inspection via sudoers
+
+### Changed
+- Postgres shared memory enforcement now recreates the Supabase DB container on Docker Desktop with `shm_size=4g`
+- OpenObserve OTEL headers are persisted into `.env` and propagated to Archon services and compose config
+- Observability E2E test now authenticates OTLP ingestion requests
+
+### Fixed
+- Bootstrap NVM install under zsh (glob expansion error)
+- OpenObserve OTLP auth missing from validation requests
+
 ## [0.8.0] - 2025-12-27
 
 ### Added
@@ -133,7 +147,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/AeyeOps/aeo-archon/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/AeyeOps/aeo-archon/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/AeyeOps/aeo-archon/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/AeyeOps/aeo-archon/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/AeyeOps/aeo-archon/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/AeyeOps/aeo-archon/compare/v0.5.0...v0.6.0

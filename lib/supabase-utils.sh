@@ -365,11 +365,142 @@ preflight_checks(){
 
 # Enforce shm_size on Postgres container after Supabase provisions it
 # Supabase CLI ignores Docker daemon defaults, so we must modify post-creation
-# Uses hostconfig.json edit which persists across container restarts (not recreates)
+# Uses hostconfig.json edit on native Docker; recreates container on Docker Desktop
+recreate_container_with_shm_size(){
+  local container_name="$1"
+  local desired_shm_bytes="$2"
+
+  if ! command -v jq >/dev/null 2>&1; then
+    err "jq is required to recreate $container_name with a new shm_size"
+    return 1
+  fi
+
+  local tmp_json
+  tmp_json="$(mktemp)"
+  docker inspect "$container_name" > "$tmp_json"
+
+  local image entrypoint0 working_dir user hostname stop_signal stop_timeout restart_policy log_driver
+  image=$(jq -r '.[0].Config.Image // empty' "$tmp_json")
+  entrypoint0=$(jq -r '.[0].Config.Entrypoint[0] // empty' "$tmp_json")
+  working_dir=$(jq -r '.[0].Config.WorkingDir // empty' "$tmp_json")
+  user=$(jq -r '.[0].Config.User // empty' "$tmp_json")
+  hostname=$(jq -r '.[0].Config.Hostname // empty' "$tmp_json")
+  stop_signal=$(jq -r '.[0].Config.StopSignal // empty' "$tmp_json")
+  stop_timeout=$(jq -r '.[0].Config.StopTimeout // empty' "$tmp_json")
+  restart_policy=$(jq -r '.[0].HostConfig.RestartPolicy.Name // empty' "$tmp_json")
+  log_driver=$(jq -r '.[0].HostConfig.LogConfig.Type // empty' "$tmp_json")
+  local network_mode
+  network_mode=$(jq -r '.[0].HostConfig.NetworkMode // empty' "$tmp_json")
+
+  mapfile -t envs < <(jq -r '.[0].Config.Env[]?' "$tmp_json")
+  mapfile -t binds < <(jq -r '.[0].HostConfig.Binds[]?' "$tmp_json")
+  mapfile -t labels < <(jq -r '.[0].Config.Labels | to_entries[]? | "\(.key)=\(.value)"' "$tmp_json")
+  mapfile -t extra_hosts < <(jq -r '.[0].HostConfig.ExtraHosts[]?' "$tmp_json")
+  mapfile -t port_bindings < <(jq -r '.[0].HostConfig.PortBindings | to_entries[]? | .key as $cport | .value[0] | if .HostIp == "" then "\(.HostPort):\($cport)" else "\(.HostIp):\(.HostPort):\($cport)" end' "$tmp_json")
+  mapfile -t net_aliases < <(jq -r --arg net "$network_mode" '.[0].NetworkSettings.Networks[$net].Aliases[]?' "$tmp_json")
+  local entrypoint_arg1 entrypoint_arg2
+  entrypoint_arg1=$(jq -r '.[0].Config.Entrypoint[1] // empty' "$tmp_json")
+  entrypoint_arg2=$(jq -r '.[0].Config.Entrypoint[2] // empty' "$tmp_json")
+  local entrypoint_args=()
+  local entrypoint_extra=()
+  [[ -n "$entrypoint_arg1" ]] && entrypoint_args+=("$entrypoint_arg1")
+  [[ -n "$entrypoint_arg2" ]] && entrypoint_args+=("$entrypoint_arg2")
+  mapfile -t entrypoint_extra < <(jq -r '.[0].Config.Entrypoint[3:][]?' "$tmp_json")
+  for arg in "${entrypoint_extra[@]}"; do
+    entrypoint_args+=("$arg")
+  done
+  mapfile -t cmd_args < <(jq -r '.[0].Config.Cmd[]?' "$tmp_json")
+
+  local health_cmd health_interval health_timeout health_retries
+  health_cmd=$(jq -r '.[0].Config.Healthcheck.Test[1:]? // [] | join(" ")' "$tmp_json")
+  health_interval=$(jq -r '.[0].Config.Healthcheck.Interval // 0' "$tmp_json")
+  health_timeout=$(jq -r '.[0].Config.Healthcheck.Timeout // 0' "$tmp_json")
+  health_retries=$(jq -r '.[0].Config.Healthcheck.Retries // 0' "$tmp_json")
+
+  ns_to_duration(){
+    local ns="$1"
+    if [[ -z "$ns" || "$ns" == "0" ]]; then
+      echo ""
+      return 0
+    fi
+    local seconds=$((ns/1000000000))
+    if (( seconds > 0 )); then
+      echo "${seconds}s"
+    else
+      echo "${ns}ns"
+    fi
+  }
+
+  echo "Recreating $container_name with shm_size=${desired_shm_bytes} bytes..."
+  docker stop "$container_name" >/dev/null 2>&1 || true
+  docker rm -f "$container_name" >/dev/null 2>&1 || true
+
+  local create_cmd=(docker create --name "$container_name" --shm-size "$desired_shm_bytes")
+  [[ -n "$restart_policy" && "$restart_policy" != "no" ]] && create_cmd+=(--restart "$restart_policy")
+  [[ -n "$log_driver" ]] && create_cmd+=(--log-driver "$log_driver")
+  [[ -n "$working_dir" ]] && create_cmd+=(--workdir "$working_dir")
+  [[ -n "$user" ]] && create_cmd+=(--user "$user")
+  [[ -n "$hostname" ]] && create_cmd+=(--hostname "$hostname")
+  [[ -n "$stop_signal" ]] && create_cmd+=(--stop-signal "$stop_signal")
+  [[ -n "$stop_timeout" ]] && create_cmd+=(--stop-timeout "$stop_timeout")
+  [[ -n "$network_mode" && "$network_mode" != "default" ]] && create_cmd+=(--network "$network_mode")
+
+  for alias in "${net_aliases[@]}"; do
+    create_cmd+=(--network-alias "$alias")
+  done
+  for env in "${envs[@]}"; do
+    create_cmd+=(--env "$env")
+  done
+  for bind in "${binds[@]}"; do
+    create_cmd+=(-v "$bind")
+  done
+  for label in "${labels[@]}"; do
+    create_cmd+=(--label "$label")
+  done
+  for host in "${extra_hosts[@]}"; do
+    create_cmd+=(--add-host "$host")
+  done
+  for port in "${port_bindings[@]}"; do
+    create_cmd+=(-p "$port")
+  done
+
+  if [[ -n "$health_cmd" ]]; then
+    create_cmd+=(--health-cmd "$health_cmd")
+    local interval_str timeout_str
+    interval_str="$(ns_to_duration "$health_interval")"
+    timeout_str="$(ns_to_duration "$health_timeout")"
+    [[ -n "$interval_str" ]] && create_cmd+=(--health-interval "$interval_str")
+    [[ -n "$timeout_str" ]] && create_cmd+=(--health-timeout "$timeout_str")
+    [[ -n "$health_retries" && "$health_retries" != "0" ]] && create_cmd+=(--health-retries "$health_retries")
+  fi
+
+  if [[ -n "$entrypoint0" ]]; then
+    create_cmd+=(--entrypoint "$entrypoint0")
+  fi
+  create_cmd+=("$image")
+  if [[ ${#entrypoint_args[@]} -gt 0 ]]; then
+    create_cmd+=("${entrypoint_args[@]}")
+  fi
+  if [[ ${#cmd_args[@]} -gt 0 ]]; then
+    create_cmd+=("${cmd_args[@]}")
+  fi
+
+  rm -f "$tmp_json"
+
+  if ! "${create_cmd[@]}"; then
+    err "Failed to recreate $container_name with shm_size"
+    return 1
+  fi
+
+  docker start "$container_name" >/dev/null 2>&1
+  return 0
+}
+
 enforce_postgres_shm_size(){
   local container_name="${1:-supabase_db_supabase}"
   local desired_shm_bytes="${2:-4294967296}"  # 4GB default
-  local desired_shm_human="4GB"
+  local desired_shm_human
+  desired_shm_human="$(numfmt --to=iec "$desired_shm_bytes" 2>/dev/null || echo "${desired_shm_bytes} bytes")"
 
   # Check if container exists
   if ! docker ps -a --format '{{.Names}}' | grep -q "^${container_name}$"; then
@@ -396,21 +527,42 @@ enforce_postgres_shm_size(){
     return 1
   fi
 
-  local host_config="/var/lib/docker/containers/${container_id}/hostconfig.json"
+  local docker_root_dir
+  docker_root_dir="$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || echo "/var/lib/docker")"
+  local host_config="${docker_root_dir}/containers/${container_id}/hostconfig.json"
+
+  # Docker Desktop uses containerd snapshotter/image store and does not expose
+  # per-container hostconfig.json on the WSL host filesystem.
+  local docker_os
+  docker_os="$(docker info -f '{{.OperatingSystem}}' 2>/dev/null || true)"
+  if [[ "$docker_os" == *"Docker Desktop"* ]]; then
+    warn "Docker Desktop detected; recreating $container_name with shm_size=${desired_shm_human}"
+    if recreate_container_with_shm_size "$container_name" "$desired_shm_bytes"; then
+      ok "Postgres container recreated with shm_size=${desired_shm_human}"
+      return 0
+    fi
+    err "Failed to recreate $container_name with shm_size on Docker Desktop"
+    return 1
+  fi
+
+  if [[ ! -f "$host_config" ]]; then
+    err "hostconfig.json not found at $host_config (DockerRootDir=$docker_root_dir)"
+    return 1
+  fi
 
   # Check if we have access (need root)
   if [[ ! -w "$host_config" ]] && [[ $EUID -ne 0 ]]; then
     warn "Cannot modify hostconfig.json without root privileges"
-    warn "Run with sudo or use: docker exec -u root $container_name mount -o remount,size=4g /dev/shm"
+    warn "Run with sudo: sudo enforce_postgres_shm_size $container_name $desired_shm_bytes"
     return 1
   fi
 
-  # Stop the container first
-  echo "Stopping $container_name..."
-  docker stop "$container_name" >/dev/null 2>&1 || true
-
   # Update hostconfig.json
   if [[ -f "$host_config" ]]; then
+    # Stop the container first
+    echo "Stopping $container_name..."
+    docker stop "$container_name" >/dev/null 2>&1 || true
+
     # Backup
     cp "$host_config" "${host_config}.backup" 2>/dev/null || true
 
@@ -423,8 +575,7 @@ enforce_postgres_shm_size(){
       return 1
     fi
   else
-    err "hostconfig.json not found at $host_config"
-    docker start "$container_name" >/dev/null 2>&1 || true
+    err "hostconfig.json not found at $host_config (DockerRootDir=$docker_root_dir)"
     return 1
   fi
 

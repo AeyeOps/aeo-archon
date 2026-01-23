@@ -229,17 +229,51 @@ test_observability(){
     err "OpenObserve UI not responding (HTTP $status)"; ((failures++))
   fi
 
-  # Test 3: OTLP endpoint accepting connections
-  if command -v nc >/dev/null 2>&1; then
-    if nc -z localhost 4318 2>/dev/null; then
-      ok "OTLP HTTP endpoint open (port 4318)"
+  # Test 3: OTLP HTTP endpoint auth + ingest path
+  local otlp_endpoint="${OTEL_EXPORTER_OTLP_ENDPOINT:-http://localhost:5080/api/default}"
+  local auth_header=""
+
+  if [[ -n "${OTEL_EXPORTER_OTLP_HEADERS:-}" ]]; then
+    IFS=',' read -ra header_pairs <<< "$OTEL_EXPORTER_OTLP_HEADERS"
+    for pair in "${header_pairs[@]}"; do
+      pair="${pair## }"
+      if [[ "$pair" == Authorization=* ]]; then
+        auth_header="Authorization: ${pair#Authorization=}"
+        break
+      fi
+    done
+  fi
+
+  if [[ -z "$auth_header" && -n "${OPENOBSERVE_USER:-}" && -n "${OPENOBSERVE_PASSWORD:-}" ]]; then
+    local basic
+    if command -v base64 >/dev/null 2>&1; then
+      basic=$(printf '%s' "${OPENOBSERVE_USER}:${OPENOBSERVE_PASSWORD}" | base64 | tr -d '\n')
     else
-      warn "OTLP HTTP endpoint not reachable"
+      basic=$(python3 - <<PY
+import base64
+user = "${OPENOBSERVE_USER}"
+password = "${OPENOBSERVE_PASSWORD}"
+print(base64.b64encode(f"{user}:{password}".encode()).decode(), end="")
+PY
+)
     fi
-  elif timeout 1 bash -c 'cat < /dev/null > /dev/tcp/localhost/4318' 2>/dev/null; then
-    ok "OTLP HTTP endpoint open (port 4318)"
+    auth_header="Authorization: Basic ${basic}"
+  fi
+
+  if [[ -n "$auth_header" ]]; then
+    local status_otlp
+    status_otlp=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+      -H "$auth_header" \
+      -H "Content-Type: application/x-protobuf" \
+      -X POST --data-binary '' \
+      "${otlp_endpoint}/v1/traces" 2>/dev/null)
+    if [[ "$status_otlp" == "401" || "$status_otlp" == "403" || "$status_otlp" == "000" ]]; then
+      warn "OTLP HTTP endpoint auth failed (HTTP $status_otlp)"
+    else
+      ok "OTLP HTTP endpoint reachable (HTTP $status_otlp)"
+    fi
   else
-    warn "OTLP HTTP endpoint not reachable (or nc not installed)"
+    warn "OTLP auth header not configured"
   fi
 
   return $failures

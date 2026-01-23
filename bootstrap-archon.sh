@@ -178,8 +178,7 @@ fi
 docker info >/dev/null 2>&1 && ok "Docker daemon active" || { err "Docker daemon not running"; exit 1; }
 
 # Note: Postgres shm_size is enforced post-provisioning via enforce_postgres_shm_size()
-# in lib/supabase-utils.sh, called from archon-up.sh after supabase start completes.
-# Setting Docker daemon defaults doesn't work because Supabase CLI ignores them.
+# in lib/supabase-utils.sh, called from archon-up.sh after Supabase start completes.
 
 # Install docker compose plugin
 if ! docker compose version >/dev/null 2>&1; then
@@ -210,14 +209,14 @@ fi
 NVM_DIR="$USER_HOME/.nvm"
 
 if [[ ! -d "$NVM_DIR" ]]; then
-  su - "$CURRENT_USER" -c "curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash"
+  su - "$CURRENT_USER" -c "bash -lc \"curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash\""
   ok "NVM installed"
 else
   ok "NVM already installed"
 fi
 
-su - "$CURRENT_USER" -c "export NVM_DIR='$NVM_DIR'; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm install $NODE_VERSION_REQUIRED > /dev/null"
-ok "Node.js $(su - "$CURRENT_USER" -c "export NVM_DIR='$NVM_DIR'; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm current") ensured"
+su - "$CURRENT_USER" -c "bash -lc \"export NVM_DIR='$NVM_DIR'; [ -s '$NVM_DIR/nvm.sh' ] && . '$NVM_DIR/nvm.sh' && nvm install '$NODE_VERSION_REQUIRED' >/dev/null\""
+ok "Node.js $(su - "$CURRENT_USER" -c "bash -lc \"export NVM_DIR='$NVM_DIR'; [ -s '$NVM_DIR/nvm.sh' ] && . '$NVM_DIR/nvm.sh' && nvm current\"") ensured"
 
 su - "$CURRENT_USER" -c "export NVM_DIR='$NVM_DIR'; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npx --yes supabase@$SUPABASE_VERSION --help >/dev/null"
 ok "npx supabase@$SUPABASE_VERSION available"

@@ -5,6 +5,8 @@
 
 A production-ready wrapper for [Archon](https://github.com/coleam00/archon) that provides automated bootstrap, migration management, and operational tooling for self-hosted deployments.
 
+**Current Release**: v0.8.1
+
 ## Features
 
 - **One-Command Bootstrap**: Install prerequisites, clone upstream, and launch the full stack
@@ -106,6 +108,11 @@ ARCHON_UI_PORT=3737
 PROD=true                       # Single-port mode (API at /api on UI port)
 AGENTS_ENABLED=true             # Enable agents service
 LOGFIRE_ENABLED=true            # Enable OpenObserve telemetry
+
+# OpenObserve (auto-configured by bootstrap)
+OPENOBSERVE_USER=<user>
+OPENOBSERVE_PASSWORD=<password>
+OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic <base64>"  # auto-generated
 ```
 
 ## Operations

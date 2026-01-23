@@ -80,7 +80,8 @@ if [[ ! -f "$ENV_FILE" ]]; then
   fi
 fi
 
-upsert_env(){ local k="$1"; local v="$2"; local tmp="$ENV_FILE.tmp"; awk -v k="$k" -v v="$v" 'BEGIN{done=0}{ if(!done && $0 ~ "^" k "=") { print k"="v; done=1 } else { print $0 } } END{ if(!done) print k"="v }' "$ENV_FILE" > "$tmp"; mv "$tmp" "$ENV_FILE"; }
+upsert_env_file(){ local file="$1"; local k="$2"; local v="$3"; local tmp="${file}.tmp"; awk -v k="$k" -v v="$v" 'BEGIN{done=0}{ if(!done && $0 ~ "^" k "=") { print k"="v; done=1 } else { print $0 } } END{ if(!done) print k"="v }' "$file" > "$tmp"; mv "$tmp" "$file"; }
+upsert_env(){ local k="$1"; local v="$2"; upsert_env_file "$ENV_FILE" "$k" "$v"; }
 merge_csv_unique(){ local csv="$1"; local item="$2"; awk -v csv="$csv" -v item="$item" 'BEGIN{ n=split(csv,a,/[ ,]+/); for(i=1;i<=n;i++) if(length(a[i])) { if(!s[a[i]]) { s[a[i]]=1; o[++m]=a[i] } } if(length(item)&&!s[item]) o[++m]=item; for(i=1;i<=m;i++){ if(i>1) printf ","; printf "%s", o[i] } printf "\n" }'; }
 upsert_if_empty(){ local k="$1"; local v="$2"; if ! grep -q "^${k}=" "$ENV_FILE" || grep -q "^${k}=\s*$" "$ENV_FILE"; then upsert_env "$k" "$v"; fi }
 
@@ -139,6 +140,41 @@ upsert_if_empty OTEL_TRACES_SAMPLER "always_on"
 upsert_if_empty OTEL_SERVICE_NAME_ARCHON_SERVER "archon-server"
 upsert_if_empty OTEL_SERVICE_NAME_ARCHON_MCP "archon-mcp"
 upsert_if_empty OTEL_SERVICE_NAME_ARCHON_AGENTS "archon-agents"
+
+# Ensure OTLP auth header matches OpenObserve credentials (for local ingest/auth checks)
+OPENOBSERVE_USER_VAL=$(grep -E '^OPENOBSERVE_USER=' "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)
+OPENOBSERVE_PASSWORD_VAL=$(grep -E '^OPENOBSERVE_PASSWORD=' "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)
+OTLP_HEADERS_VAL_RAW=$(grep -E '^OTEL_EXPORTER_OTLP_HEADERS=' "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)
+OTLP_HEADERS_VAL="${OTLP_HEADERS_VAL_RAW%\"}"
+OTLP_HEADERS_VAL="${OTLP_HEADERS_VAL#\"}"
+if [[ -n "$OPENOBSERVE_USER_VAL" && -n "$OPENOBSERVE_PASSWORD_VAL" ]]; then
+  if command -v base64 >/dev/null 2>&1; then
+    OO_BASIC=$(printf '%s' "${OPENOBSERVE_USER_VAL}:${OPENOBSERVE_PASSWORD_VAL}" | base64 | tr -d '\n')
+  else
+    OO_BASIC=$(python3 - <<PY
+import base64
+user = "${OPENOBSERVE_USER_VAL}"
+password = "${OPENOBSERVE_PASSWORD_VAL}"
+print(base64.b64encode(f"{user}:{password}".encode()).decode(), end="")
+PY
+)
+  fi
+  if [[ -n "${OO_BASIC:-}" ]]; then
+    DESIRED_HEADERS="Authorization=Basic ${OO_BASIC}"
+    DESIRED_HEADERS_QUOTED="\"${DESIRED_HEADERS}\""
+    if [[ -z "$OTLP_HEADERS_VAL" ]]; then
+      upsert_env OTEL_EXPORTER_OTLP_HEADERS "$DESIRED_HEADERS_QUOTED"
+    elif [[ "$OTLP_HEADERS_VAL" == Authorization=Basic* && "$OTLP_HEADERS_VAL" != "$DESIRED_HEADERS" ]]; then
+      upsert_env OTEL_EXPORTER_OTLP_HEADERS "$DESIRED_HEADERS_QUOTED"
+    elif [[ "$OTLP_HEADERS_VAL" == Authorization=Basic* && "$OTLP_HEADERS_VAL_RAW" != "$DESIRED_HEADERS_QUOTED" ]]; then
+      upsert_env OTEL_EXPORTER_OTLP_HEADERS "$DESIRED_HEADERS_QUOTED"
+    fi
+    ARCHON_SRC_ENV="${ARCHON_SRC_DIR:-$ROOT_DIR/archon-src}/.env"
+    if [[ -f "$ARCHON_SRC_ENV" ]]; then
+      upsert_env_file "$ARCHON_SRC_ENV" OTEL_EXPORTER_OTLP_HEADERS "$DESIRED_HEADERS_QUOTED"
+    fi
+  fi
+fi
 
 # Generate stable encryption key for credentials if not present
 # This key persists across Supabase restarts (unlike SUPABASE_SERVICE_KEY which regenerates)
@@ -246,18 +282,31 @@ ensure_supabase_env(){
   fi
 
   # Enforce shm_size on Postgres container (Supabase CLI ignores Docker daemon defaults)
-  # This must run as root to modify hostconfig.json; skip gracefully if not privileged
+  # Native Docker may require root; Docker Desktop can recreate as non-root
   if type -t enforce_postgres_shm_size >/dev/null 2>&1; then
-    if [[ $EUID -eq 0 ]]; then
-      enforce_postgres_shm_size
-    else
-      # Check current shm_size and warn if inadequate
-      local current_shm
-      current_shm=$(docker inspect -f '{{.HostConfig.ShmSize}}' supabase_db_supabase 2>/dev/null || echo "0")
-      if [[ "$current_shm" -lt 4294967296 ]]; then
-        warn "Postgres shm_size is $(numfmt --to=iec $current_shm 2>/dev/null || echo "${current_shm} bytes") (need 4GB for large shared_buffers)"
-        warn "Run bootstrap-archon.sh as root or: sudo enforce_postgres_shm_size"
+    local desired_shm_bytes
+    desired_shm_bytes="${POSTGRES_SHM_SIZE_BYTES:-4294967296}"
+    if ! enforce_postgres_shm_size supabase_db_supabase "$desired_shm_bytes"; then
+      if [[ $EUID -ne 0 ]]; then
+        # Attempt non-interactive sudo (avoid hanging on password prompt)
+        if command -v sudo >/dev/null 2>&1; then
+          sudo -n bash -lc "source \"$ROOT_DIR/lib/supabase-utils.sh\" && enforce_postgres_shm_size supabase_db_supabase \"$desired_shm_bytes\"" || true
+        fi
       fi
+    fi
+
+    # Fail fast if shm_size is still too small
+    local current_shm
+    current_shm=$(docker inspect -f '{{.HostConfig.ShmSize}}' supabase_db_supabase 2>/dev/null || echo "0")
+    if [[ "$current_shm" -lt "$desired_shm_bytes" ]]; then
+      err "Postgres shm_size is $(numfmt --to=iec "$current_shm" 2>/dev/null || echo "${current_shm} bytes") (required: $(numfmt --to=iec "$desired_shm_bytes" 2>/dev/null || echo "${desired_shm_bytes} bytes"))"
+      docker_os=$(docker info -f '{{.OperatingSystem}}' 2>/dev/null || true)
+      if [[ "$docker_os" == *"Docker Desktop"* ]]; then
+        err "Docker Desktop detected: shm_size enforcement failed. Check bootstrap logs for container recreation errors."
+      else
+        err "Run bootstrap-archon.sh with sudo (so shm_size can be enforced)."
+      fi
+      exit 1
     fi
   fi
 
@@ -563,7 +612,9 @@ if [[ "$observability" != "none" ]]; then
   if [[ -n "$ALT_HOST" && "$ALT_HOST" != "$HOST_VAL" ]]; then
     echo "  (WSL) http://$ALT_HOST:5080"
   fi
-  echo "  (OpenObserve login: admin@archon.local / archon-admin)"
+  OO_USER=$(grep -E '^OPENOBSERVE_USER=' "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)
+  OO_PASS=$(grep -E '^OPENOBSERVE_PASSWORD=' "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)
+  echo "  (OpenObserve login: ${OO_USER:-admin@archon.local} / ${OO_PASS:-archon123})"
 fi
 
 # Record versions for debugging
